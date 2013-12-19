@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2011 The Project Lombok Authors.
+ * Copyright (C) 2009-2012 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@ package lombok.javac;
 import java.lang.annotation.Annotation;
 
 import lombok.core.AnnotationValues;
+import lombok.core.SpiLoadUtil;
 
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 
@@ -32,7 +33,7 @@ import com.sun.tools.javac.tree.JCTree.JCAnnotation;
  * 
  * You MUST replace 'T' with a specific annotation type, such as:
  * 
- * {@code public class HandleGetter implements JavacAnnotationHandler<Getter>}
+ * {@code public class HandleGetter extends JavacAnnotationHandler<Getter>}
  * 
  * Because this generics parameter is inspected to figure out which class you're interested in.
  * 
@@ -55,9 +56,11 @@ public abstract class JavacAnnotationHandler<T extends Annotation> {
 	public abstract void handle(AnnotationValues<T> annotation, JCAnnotation ast, JavacNode annotationNode);
 	
 	/**
-	 * Return true if this handler requires resolution.
+	 * This handler is a handler for the given annotation; you don't normally need to override this class
+	 * as the annotation type is extracted from your {@code extends EclipseAnnotationHandler<AnnotationTypeHere>}
+	 * signature.
 	 */
-	public boolean isResolutionBased() {
-		return false;
+	@SuppressWarnings("unchecked") public Class<T> getAnnotationHandledByThisHandler() {
+		return (Class<T>) SpiLoadUtil.findAnnotationClass(getClass(), JavacAnnotationHandler.class);
 	}
 }

@@ -40,12 +40,16 @@ public class PatchValEclipsePortal {
 			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
 			//do anything useful here.
 		} catch (IllegalAccessException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e);
 		} catch (InvocationTargetException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e.getCause());
 		} catch (NullPointerException e) {
-			e.initCause(Reflection.problem);
-			throw e;
+			if (!"false".equals(System.getProperty("lombok.debug.reflection", "false"))) {
+				e.initCause(Reflection.problem);
+				throw e;
+			}
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here.
 		}
 	}
 	
@@ -56,12 +60,16 @@ public class PatchValEclipsePortal {
 			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
 			//do anything useful here.
 		} catch (IllegalAccessException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e);
 		} catch (InvocationTargetException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e.getCause());
 		} catch (NullPointerException e) {
-			e.initCause(Reflection.problem);
-			throw e;
+			if (!"false".equals(System.getProperty("lombok.debug.reflection", "false"))) {
+				e.initCause(Reflection.problem);
+				throw e;
+			}
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here.
 		}
 	}
 	
@@ -72,12 +80,16 @@ public class PatchValEclipsePortal {
 			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
 			//do anything useful here.
 		} catch (IllegalAccessException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e);
 		} catch (InvocationTargetException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e.getCause());
 		} catch (NullPointerException e) {
-			e.initCause(Reflection.problem);
-			throw e;
+			if (!"false".equals(System.getProperty("lombok.debug.reflection", "false"))) {
+				e.initCause(Reflection.problem);
+				throw e;
+			}
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here.
 		}
 	}
 	
@@ -88,12 +100,16 @@ public class PatchValEclipsePortal {
 			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
 			//do anything useful here.
 		} catch (IllegalAccessException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e);
 		} catch (InvocationTargetException e) {
-			Lombok.sneakyThrow(e);
+			throw Lombok.sneakyThrow(e.getCause());
 		} catch (NullPointerException e) {
-			e.initCause(Reflection.problem);
-			throw e;
+			if (!"false".equals(System.getProperty("lombok.debug.reflection", "false"))) {
+				e.initCause(Reflection.problem);
+				throw e;
+			}
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here. 
 		}
 	}
 	
@@ -118,10 +134,10 @@ public class PatchValEclipsePortal {
 						Object.class,
 						Class.forName(SINGLEVARIABLEDECLARATION_SIG),
 						Class.forName(LOCALDECLARATION_SIG));
-			} catch (Exception e) {
+			} catch (Throwable t) {
 				// That's problematic, but as long as no local classes are used we don't actually need it.
 				// Better fail on local classes than crash altogether.
-				problem_ = e;
+				problem_ = t;
 			}
 			copyInitializationOfForEachIterable = m;
 			copyInitializationOfLocalDeclaration = n;

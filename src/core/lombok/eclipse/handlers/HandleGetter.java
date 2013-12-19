@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2012 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,8 @@ import org.eclipse.jdt.internal.compiler.ast.ArrayTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.Assignment;
 import org.eclipse.jdt.internal.compiler.ast.BinaryExpression;
 import org.eclipse.jdt.internal.compiler.ast.Block;
+import org.eclipse.jdt.internal.compiler.ast.CastExpression;
+import org.eclipse.jdt.internal.compiler.ast.ConditionalExpression;
 import org.eclipse.jdt.internal.compiler.ast.EqualExpression;
 import org.eclipse.jdt.internal.compiler.ast.Expression;
 import org.eclipse.jdt.internal.compiler.ast.FieldDeclaration;
@@ -67,6 +69,7 @@ import org.eclipse.jdt.internal.compiler.ast.SynchronizedStatement;
 import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
+import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
 import org.mangosdk.spi.ProviderFor;
 
 /**
@@ -78,13 +81,9 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 
 	public boolean generateGetterForType(EclipseNode typeNode, EclipseNode pos, AccessLevel level, boolean checkForTypeLevelGetter) {
 		if (checkForTypeLevelGetter) {
-			if (typeNode != null) for (EclipseNode child : typeNode.down()) {
-				if (child.getKind() == Kind.ANNOTATION) {
-					if (annotationTypeMatches(Getter.class, child)) {
-						//The annotation will make it happen, so we can skip it.
-						return true;
-					}
-				}
+			if (hasAnnotation(Getter.class, typeNode)) {
+				//The annotation will make it happen, so we can skip it.
+				return true;
 			}
 		}
 		
@@ -124,16 +123,12 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 	 * be a warning if its already there. The default access level is used.
 	 */
 	public void generateGetterForField(EclipseNode fieldNode, ASTNode pos, AccessLevel level, boolean lazy) {
-		for (EclipseNode child : fieldNode.down()) {
-			if (child.getKind() == Kind.ANNOTATION) {
-				if (annotationTypeMatches(Getter.class, child)) {
-					//The annotation will make it happen, so we can skip it.
-					return;
-				}
-			}
+		if (hasAnnotation(Getter.class, fieldNode)) {
+			//The annotation will make it happen, so we can skip it.
+			return;
 		}
 		
-		createGetterForField(level, fieldNode, fieldNode, pos, false, lazy);
+		createGetterForField(level, fieldNode, fieldNode, pos, false, lazy, Collections.<Annotation>emptyList());
 	}
 	
 	public void handle(AnnotationValues<Getter> annotation, Annotation ast, EclipseNode annotationNode) {
@@ -150,25 +145,30 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		
 		if (node == null) return;
 		
+		List<Annotation> onMethod = unboxAndRemoveAnnotationParameter(ast, "onMethod", "@Getter(onMethod=", annotationNode);
+		
 		switch (node.getKind()) {
 		case FIELD:
-			createGetterForFields(level, annotationNode.upFromAnnotationToFields(), annotationNode, annotationNode.get(), true, lazy);
+			createGetterForFields(level, annotationNode.upFromAnnotationToFields(), annotationNode, annotationNode.get(), true, lazy, onMethod);
 			break;
 		case TYPE:
+			if (!onMethod.isEmpty()) {
+				annotationNode.addError("'onMethod' is not supported for @Getter on a type.");
+			}
 			if (lazy) annotationNode.addError("'lazy' is not supported for @Getter on a type.");
 			generateGetterForType(node, annotationNode, level, false);
 			break;
 		}
 	}
 	
-	private void createGetterForFields(AccessLevel level, Collection<EclipseNode> fieldNodes, EclipseNode errorNode, ASTNode source, boolean whineIfExists, boolean lazy) {
+	private void createGetterForFields(AccessLevel level, Collection<EclipseNode> fieldNodes, EclipseNode errorNode, ASTNode source, boolean whineIfExists, boolean lazy, List<Annotation> onMethod) {
 		for (EclipseNode fieldNode : fieldNodes) {
-			createGetterForField(level, fieldNode, errorNode, source, whineIfExists, lazy);
+			createGetterForField(level, fieldNode, errorNode, source, whineIfExists, lazy, onMethod);
 		}
 	}
 	
 	private void createGetterForField(AccessLevel level,
-			EclipseNode fieldNode, EclipseNode errorNode, ASTNode source, boolean whineIfExists, boolean lazy) {
+			EclipseNode fieldNode, EclipseNode errorNode, ASTNode source, boolean whineIfExists, boolean lazy, List<Annotation> onMethod) {
 		if (fieldNode.getKind() != Kind.FIELD) {
 			errorNode.addError("@Getter is only supported on a class or a field.");
 			return;
@@ -187,7 +187,7 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		}
 		
 		TypeReference fieldType = copyType(field.type, source);
-		boolean isBoolean = nameEquals(fieldType.getTypeName(), "boolean") && fieldType.dimensions() == 0;
+		boolean isBoolean = isBoolean(fieldType);
 		String getterName = toGetterName(fieldNode, isBoolean);
 		
 		if (getterName == null) {
@@ -215,17 +215,7 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 			}
 		}
 		
-		MethodDeclaration method = generateGetter((TypeDeclaration) fieldNode.up().get(), fieldNode, getterName, modifier, source, lazy);
-		
-		Annotation[] deprecated = null;
-		if (isFieldDeprecated(fieldNode)) {
-			deprecated = new Annotation[] { generateDeprecatedAnnotation(source) };
-		}
-		
-		Annotation[] copiedAnnotations = copyAnnotations(source, findAnnotations(field, TransformationsUtil.NON_NULL_PATTERN), findAnnotations(field, TransformationsUtil.NULLABLE_PATTERN), findDelegatesAndMarkAsHandled(fieldNode), deprecated);
-		if (copiedAnnotations.length != 0) {
-			method.annotations = copiedAnnotations;
-		}
+		MethodDeclaration method = createGetter((TypeDeclaration) fieldNode.up().get(), fieldNode, getterName, modifier, source, lazy, onMethod);
 		
 		injectMethod(fieldNode.up(), method);
 	}
@@ -242,7 +232,8 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		return delegates.toArray(EMPTY_ANNOTATIONS_ARRAY);
 	}
 	
-	private MethodDeclaration generateGetter(TypeDeclaration parent, EclipseNode fieldNode, String name, int modifier, ASTNode source, boolean lazy) {
+	private MethodDeclaration createGetter(TypeDeclaration parent, EclipseNode fieldNode, String name, int modifier, ASTNode source, boolean lazy, List<Annotation> onMethod) {
+		FieldDeclaration field = (FieldDeclaration) fieldNode.get();
 		
 		// Remember the type; lazy will change it;
 		TypeReference returnType = copyType(((FieldDeclaration) fieldNode.get()).type, source);
@@ -255,7 +246,6 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		}
 		
 		MethodDeclaration method = new MethodDeclaration(parent.compilationResult);
-		setGeneratedBy(method, source);
 		method.modifiers = modifier;
 		method.returnType = returnType;
 		method.annotations = null;
@@ -268,6 +258,26 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		method.bodyStart = method.declarationSourceStart = method.sourceStart = source.sourceStart;
 		method.bodyEnd = method.declarationSourceEnd = method.sourceEnd = source.sourceEnd;
 		method.statements = statements;
+		
+		EclipseHandlerUtil.registerCreatedLazyGetter((FieldDeclaration) fieldNode.get(), method.selector, returnType);
+		
+		/* Generate annotations that must  be put on the generated method, and attach them. */ {
+			Annotation[] deprecated = null;
+			if (isFieldDeprecated(fieldNode)) {
+				deprecated = new Annotation[] { generateDeprecatedAnnotation(source) };
+			}
+			
+			Annotation[] copiedAnnotations = copyAnnotations(source,
+					onMethod.toArray(new Annotation[0]),
+					findAnnotations(field, TransformationsUtil.NON_NULL_PATTERN),
+					findAnnotations(field, TransformationsUtil.NULLABLE_PATTERN),
+					findDelegatesAndMarkAsHandled(fieldNode),
+					deprecated);
+			
+			if (copiedAnnotations.length != 0) method.annotations = copiedAnnotations;
+		}
+		
+		method.traverse(new SetGeneratedByVisitor(source), parent.scope);
 		return method;
 	}
 
@@ -275,12 +285,10 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		FieldDeclaration field = (FieldDeclaration) fieldNode.get();
 		Expression fieldRef = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
 		Statement returnStatement = new ReturnStatement(fieldRef, field.sourceStart, field.sourceEnd);
-		setGeneratedBy(returnStatement, source);
 		return new Statement[] {returnStatement};
 	}
 	
 	private static final char[][] AR = fromQualifiedName("java.util.concurrent.atomic.AtomicReference");
-	private static final TypeReference[][] AR_PARAMS = new TypeReference[5][];
 	
 	private static final java.util.Map<String, char[][]> TYPE_MAP;
 	static {
@@ -299,54 +307,62 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 	private static char[] valueName = "value".toCharArray();
 	private static char[] actualValueName = "actualValue".toCharArray();
 	
+	private static final int PARENTHESIZED = (1 << ASTNode.ParenthesizedSHIFT) & ASTNode.ParenthesizedMASK;
+	
 	private Statement[] createLazyGetterBody(ASTNode source, EclipseNode fieldNode) {
 		/*
-		java.util.concurrent.atomic.AtomicReference<ValueType> value = this.fieldName.get();
+		java.lang.Object value = this.fieldName.get();
 		if (value == null) {
 			synchronized (this.fieldName) {
 				value = this.fieldName.get();
 				if (value == null) {
-					final ValueType actualValue = new ValueType();
-					value = new java.util.concurrent.atomic.AtomicReference<ValueType>(actualValue);
+					final RawValueType actualValue = INITIALIZER_EXPRESSION;
+					[IF PRIMITIVE]
+					value = actualValue;
+					[ELSE]
+					value = actualValue == null ? this.fieldName : actualValue;
+					[END IF]
 					this.fieldName.set(value);
 				}
 			}
 		}
-		return value.get();
+		[IF PRIMITIVE]
+		return (BoxedValueType) value;
+		[ELSE]
+		return (BoxedValueType) (value == this.fieldName ? null : value);
+		[END IF]
 		*/
 		
 		FieldDeclaration field = (FieldDeclaration) fieldNode.get();
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
 		
-		TypeReference componentType = copyType(field.type, source);
+		TypeReference rawComponentType = copyType(field.type, source);
+		TypeReference boxedComponentType = null;
+		boolean isPrimitive = false;
 		if (field.type instanceof SingleTypeReference && !(field.type instanceof ArrayTypeReference)) {
 			char[][] newType = TYPE_MAP.get(new String(((SingleTypeReference)field.type).token));
 			if (newType != null) {
-				componentType = new QualifiedTypeReference(newType, poss(source, 3));
-				setGeneratedBy(componentType, source);
+				boxedComponentType = new QualifiedTypeReference(newType, poss(source, 3));
+				isPrimitive = true;
 			}
 		}
+		if (boxedComponentType == null) boxedComponentType = copyType(field.type, source);
+		boxedComponentType.sourceStart = pS; boxedComponentType.sourceEnd = boxedComponentType.statementEnd = pE;
 		
 		Statement[] statements = new Statement[3];
 		
-		/* java.util.concurrent.atomic.AtomicReference<ValueType> value = this.fieldName.get(); */ {
+		/* java.lang.Object value = this.fieldName.get(); */ {
 			LocalDeclaration valueDecl = new LocalDeclaration(valueName, pS, pE);
-			setGeneratedBy(valueDecl, source);
-			TypeReference[][] typeParams = AR_PARAMS.clone();
-			typeParams[4] = new TypeReference[] {copyType(componentType, source)};
-			valueDecl.type = new ParameterizedQualifiedTypeReference(AR, typeParams, 0, poss(source, 5));
+			valueDecl.type = new QualifiedTypeReference(TypeConstants.JAVA_LANG_OBJECT, poss(source, 3));
 			valueDecl.type.sourceStart = pS; valueDecl.type.sourceEnd = valueDecl.type.statementEnd = pE;
-			setGeneratedBy(valueDecl.type, source);
 			
 			MessageSend getter = new MessageSend();
-			setGeneratedBy(getter, source);
 			getter.sourceStart = pS; getter.statementEnd = getter.sourceEnd = pE;
 			getter.selector = new char[] {'g', 'e', 't'};
 			getter.receiver = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
 			
 			valueDecl.initialization = getter;
-			setGeneratedBy(valueDecl.initialization, source);
 			statements[0] = valueDecl;
 		}
 		
@@ -355,8 +371,12 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 			synchronized (this.fieldName) {
 				value = this.fieldName.get();
 				if (value == null) { 
-					final ValueType actualValue = new ValueType();
-					value = new java.util.concurrent.atomic.AtomicReference<ValueType>(actualValue);
+					final ValueType actualValue = INITIALIZER_EXPRESSION;
+					[IF PRIMITIVE]
+					value = actualValue;
+					[ELSE]
+					value = actualValue == null ? this.fieldName : actualValue;
+					[END IF]
 					this.fieldName.set(value);
 				}
 			}
@@ -365,118 +385,107 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 			EqualExpression cond = new EqualExpression(
 					new SingleNameReference(valueName, p), new NullLiteral(pS, pE),
 					BinaryExpression.EQUAL_EQUAL);
-			setGeneratedBy(cond.left, source);
-			setGeneratedBy(cond.right, source);
-			setGeneratedBy(cond, source);
 			Block then = new Block(0);
-			setGeneratedBy(then, source);
 			Expression lock = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
 			Block inner = new Block(0);
-			setGeneratedBy(inner, source);
 			inner.statements = new Statement[2];
 			/* value = this.fieldName.get(); */ {
 				MessageSend getter = new MessageSend();
-				setGeneratedBy(getter, source);
 				getter.sourceStart = pS; getter.sourceEnd = getter.statementEnd = pE;
 				getter.selector = new char[] {'g', 'e', 't'};
 				getter.receiver = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
 				Assignment assign = new Assignment(new SingleNameReference(valueName, p), getter, pE);
 				assign.sourceStart = pS; assign.statementEnd = assign.sourceEnd = pE;
-				setGeneratedBy(assign, source);
-				setGeneratedBy(assign.lhs, source);
 				inner.statements[0] = assign;
 			}
 			/* if (value == null) */ {
 				EqualExpression innerCond = new EqualExpression(
 						new SingleNameReference(valueName, p), new NullLiteral(pS, pE),
 						BinaryExpression.EQUAL_EQUAL);
-				setGeneratedBy(innerCond.left, source);
-				setGeneratedBy(innerCond.right, source);
-				setGeneratedBy(innerCond, source);
+				innerCond.sourceStart = pS; innerCond.sourceEnd = innerCond.statementEnd = pE;
 				Block innerThen = new Block(0);
-				setGeneratedBy(innerThen, source);
 				innerThen.statements = new Statement[3];
-				/* final ValueType actualValue = new ValueType(); */ {
+				/* final ValueType actualValue = INITIALIZER_EXPRESSION */ {
 					LocalDeclaration actualValueDecl = new LocalDeclaration(actualValueName, pS, pE);
-					setGeneratedBy(actualValueDecl, source);
-					actualValueDecl.type = copyType(field.type, source);
+					actualValueDecl.type = rawComponentType;
 					actualValueDecl.type.sourceStart = pS; actualValueDecl.type.sourceEnd = actualValueDecl.type.statementEnd = pE;
-					setGeneratedBy(actualValueDecl.type, source);
 					actualValueDecl.initialization = field.initialization;
 					actualValueDecl.modifiers = ClassFileConstants.AccFinal;
 					innerThen.statements[0] = actualValueDecl;
 				}
-				/* value = new java.util.concurrent.atomic.AtomicReference<ValueType>(actualValue); */ {
-					AllocationExpression create = new AllocationExpression();
-					setGeneratedBy(create, source);
-					create.sourceStart = pS; create.sourceEnd = create.statementEnd = pE;
-					TypeReference[][] typeParams = AR_PARAMS.clone();
-					typeParams[4] = new TypeReference[] {copyType(componentType, source)};
-					create.type = new ParameterizedQualifiedTypeReference(AR, typeParams, 0, poss(source, 5));
-					create.type.sourceStart = pS; create.type.sourceEnd = create.type.statementEnd = pE;
-					setGeneratedBy(create.type, source);
-					create.arguments = new Expression[] {new SingleNameReference(actualValueName, p)};
-					setGeneratedBy(create.arguments[0], source);
-					Assignment innerAssign = new Assignment(new SingleNameReference(valueName, p), create, pE);
-					innerAssign.sourceStart = pS; innerAssign.statementEnd = innerAssign.sourceEnd = pE;
-
-					setGeneratedBy(innerAssign, source);
-					setGeneratedBy(innerAssign.lhs, source);
-					innerThen.statements[1] = innerAssign;
+				/* [IF PRIMITIVE] value = actualValue; */ {
+					if (isPrimitive) {
+						Assignment innerAssign = new Assignment(new SingleNameReference(valueName, p), new SingleNameReference(actualValueName, p), pE);
+						innerAssign.sourceStart = pS; innerAssign.statementEnd = innerAssign.sourceEnd = pE;
+						innerThen.statements[1] = innerAssign;
+					}
+				}
+				/* [ELSE] value = actualValue == null ? this.fieldName : actualValue; */ {
+					if (!isPrimitive) {
+						EqualExpression avIsNull = new EqualExpression(
+								new SingleNameReference(actualValueName, p), new NullLiteral(pS, pE),
+								BinaryExpression.EQUAL_EQUAL);
+						avIsNull.sourceStart = pS; avIsNull.sourceEnd = avIsNull.statementEnd = pE;
+						Expression fieldRef = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
+						ConditionalExpression ternary = new ConditionalExpression(avIsNull, fieldRef, new SingleNameReference(actualValueName, p));
+						ternary.sourceStart = pS; ternary.sourceEnd = ternary.statementEnd = pE;
+						Assignment innerAssign = new Assignment(new SingleNameReference(valueName, p), ternary, pE);
+						innerAssign.sourceStart = pS; innerAssign.statementEnd = innerAssign.sourceEnd = pE;
+						innerThen.statements[1] = innerAssign;
+					}
 				}
 				
 				/* this.fieldName.set(value); */ {
 					MessageSend setter = new MessageSend();
-					setGeneratedBy(setter, source);
 					setter.sourceStart = pS; setter.sourceEnd = setter.statementEnd =  pE;
 					setter.receiver = createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source);
 					setter.selector = new char[] { 's', 'e', 't' };
 					setter.arguments = new Expression[] {
 							new SingleNameReference(valueName, p)};
-					setGeneratedBy(setter.arguments[0], source);
 					innerThen.statements[2] = setter;
 				}
 				
 				IfStatement innerIf = new IfStatement(innerCond, innerThen, pS, pE);
-				setGeneratedBy(innerIf, source);
 				inner.statements[1] = innerIf;
 			}
 			
 			SynchronizedStatement sync = new SynchronizedStatement(lock, inner, pS, pE);
-			setGeneratedBy(sync, source);
 			then.statements = new Statement[] {sync};
 			
 			IfStatement ifStatement = new IfStatement(cond, then, pS, pE);
-			setGeneratedBy(ifStatement, source);
 			statements[1] = ifStatement;
 		}
 		
-		/* return value.get(); */ {
-			MessageSend getter = new MessageSend();
-			setGeneratedBy(getter, source);
-			getter.sourceStart = pS; getter.sourceEnd = getter.statementEnd = pE;
-			getter.selector = new char[] {'g', 'e', 't'};
-			getter.receiver = new SingleNameReference(valueName, p);
-			setGeneratedBy(getter.receiver, source);
-			
-			statements[2] = new ReturnStatement(getter, pS, pE);
-			setGeneratedBy(statements[2], source);
+		/* [IF PRIMITIVE] return (BoxedValueType)value; */ {
+			if (isPrimitive) {
+				CastExpression cast = makeCastExpression(new SingleNameReference(valueName, p), boxedComponentType, source);
+				statements[2] = new ReturnStatement(cast, pS, pE);
+			}
 		}
-		
+		/* [ELSE] return (BoxedValueType)(value == this.fieldName ? null : value); */ {
+			if (!isPrimitive) {
+				EqualExpression vIsThisFieldName = new EqualExpression(
+						new SingleNameReference(valueName, p), createFieldAccessor(fieldNode, FieldAccess.ALWAYS_FIELD, source),
+						BinaryExpression.EQUAL_EQUAL);
+				vIsThisFieldName.sourceStart = pS; vIsThisFieldName.sourceEnd = vIsThisFieldName.statementEnd = pE;
+				ConditionalExpression ternary = new ConditionalExpression(vIsThisFieldName, new NullLiteral(pS, pE), new SingleNameReference(valueName, p));
+				ternary.sourceStart = pS; ternary.sourceEnd = ternary.statementEnd = pE;
+				ternary.bits |= PARENTHESIZED;
+				CastExpression cast = makeCastExpression(ternary, boxedComponentType, source);
+				statements[2] = new ReturnStatement(cast, pS, pE);
+			}
+		}
 		
 		// update the field type and init last
 			
-		/* 	private final java.util.concurrent.atomic.AtomicReference<java.util.concurrent.atomic.AtomicReference<ValueType> fieldName = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.atomic.AtomicReference<ValueType>>(); */ {
-			
-			LocalDeclaration first = (LocalDeclaration) statements[0];
-			TypeReference innerType = copyType(first.type, source);
-			
-			TypeReference[][] typeParams = AR_PARAMS.clone();
-			typeParams[4] = new TypeReference[] {copyType(innerType, source)};
+		/* 	private final java.util.concurrent.atomic.AtomicReference<java.lang.Object> fieldName = new java.util.concurrent.atomic.AtomicReference<java.lang.Object>(); */ {
+			TypeReference innerType = new QualifiedTypeReference(TypeConstants.JAVA_LANG_OBJECT, poss(source, 3));
+			TypeReference[][] typeParams = new TypeReference[5][];
+			typeParams[4] = new TypeReference[] {innerType};
 			TypeReference type = new ParameterizedQualifiedTypeReference(AR, typeParams, 0, poss(source, 5));
+			
 			// Some magic here
 			type.sourceStart = -1; type.sourceEnd = -2;
-			setGeneratedBy(type, source);
 			
 			field.type = type;
 			AllocationExpression init = new AllocationExpression();

@@ -2,10 +2,6 @@ import lombok.Data;
 @lombok.Data class Data1 {
   final int x;
   String name;
-  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data1(final int x) {
-    super();
-    this.x = x;
-  }
   public @java.lang.SuppressWarnings("all") int getX() {
     return this.x;
   }
@@ -25,7 +21,9 @@ import lombok.Data;
         return false;
     if ((this.getX() != other.getX()))
         return false;
-    if (((this.getName() == null) ? (other.getName() != null) : (! this.getName().equals((java.lang.Object) other.getName()))))
+    final java.lang.Object this$name = this.getName();
+    final java.lang.Object other$name = other.getName();
+    if (((this$name == null) ? (other$name != null) : (! this$name.equals(other$name))))
         return false;
     return true;
   }
@@ -36,20 +34,21 @@ import lombok.Data;
     final int PRIME = 31;
     int result = 1;
     result = ((result * PRIME) + this.getX());
-    result = ((result * PRIME) + ((this.getName() == null) ? 0 : this.getName().hashCode()));
+    final java.lang.Object $name = this.getName();
+    result = ((result * PRIME) + (($name == null) ? 0 : $name.hashCode()));
     return result;
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") java.lang.String toString() {
     return (((("Data1(x=" + this.getX()) + ", name=") + this.getName()) + ")");
   }
+  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data1(final int x) {
+    super();
+    this.x = x;
+  }
 }
 @Data class Data2 {
   final int x;
   String name;
-  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data2(final int x) {
-    super();
-    this.x = x;
-  }
   public @java.lang.SuppressWarnings("all") int getX() {
     return this.x;
   }
@@ -69,7 +68,9 @@ import lombok.Data;
         return false;
     if ((this.getX() != other.getX()))
         return false;
-    if (((this.getName() == null) ? (other.getName() != null) : (! this.getName().equals((java.lang.Object) other.getName()))))
+    final java.lang.Object this$name = this.getName();
+    final java.lang.Object other$name = other.getName();
+    if (((this$name == null) ? (other$name != null) : (! this$name.equals(other$name))))
         return false;
     return true;
   }
@@ -80,20 +81,21 @@ import lombok.Data;
     final int PRIME = 31;
     int result = 1;
     result = ((result * PRIME) + this.getX());
-    result = ((result * PRIME) + ((this.getName() == null) ? 0 : this.getName().hashCode()));
+    final java.lang.Object $name = this.getName();
+    result = ((result * PRIME) + (($name == null) ? 0 : $name.hashCode()));
     return result;
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") java.lang.String toString() {
     return (((("Data2(x=" + this.getX()) + ", name=") + this.getName()) + ")");
   }
+  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data2(final int x) {
+    super();
+    this.x = x;
+  }
 }
 final @Data class Data3 {
   final int x;
   String name;
-  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data3(final int x) {
-    super();
-    this.x = x;
-  }
   public @java.lang.SuppressWarnings("all") int getX() {
     return this.x;
   }
@@ -111,7 +113,9 @@ final @Data class Data3 {
     final @java.lang.SuppressWarnings("all") Data3 other = (Data3) o;
     if ((this.getX() != other.getX()))
         return false;
-    if (((this.getName() == null) ? (other.getName() != null) : (! this.getName().equals((java.lang.Object) other.getName()))))
+    final java.lang.Object this$name = this.getName();
+    final java.lang.Object other$name = other.getName();
+    if (((this$name == null) ? (other$name != null) : (! this$name.equals(other$name))))
         return false;
     return true;
   }
@@ -119,15 +123,23 @@ final @Data class Data3 {
     final int PRIME = 31;
     int result = 1;
     result = ((result * PRIME) + this.getX());
-    result = ((result * PRIME) + ((this.getName() == null) ? 0 : this.getName().hashCode()));
+    final java.lang.Object $name = this.getName();
+    result = ((result * PRIME) + (($name == null) ? 0 : $name.hashCode()));
     return result;
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") java.lang.String toString() {
     return (((("Data3(x=" + this.getX()) + ", name=") + this.getName()) + ")");
   }
+  public @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") Data3(final int x) {
+    super();
+    this.x = x;
+  }
 }
 final @Data @lombok.EqualsAndHashCode(callSuper = true) class Data4 extends java.util.Timer {
   int x;
+  Data4() {
+    super();
+  }
   public @java.lang.SuppressWarnings("all") int getX() {
     return this.x;
   }
@@ -161,14 +173,8 @@ final @Data @lombok.EqualsAndHashCode(callSuper = true) class Data4 extends java
     result = ((result * PRIME) + this.getX());
     return result;
   }
-  Data4() {
-    super();
-  }
 }
 @Data class Data5 {
-  public @java.lang.SuppressWarnings("all") Data5() {
-    super();
-  }
   public @java.lang.Override @java.lang.SuppressWarnings("all") boolean equals(final java.lang.Object o) {
     if ((o == this))
         return true;
@@ -189,11 +195,11 @@ final @Data @lombok.EqualsAndHashCode(callSuper = true) class Data4 extends java
   public @java.lang.Override @java.lang.SuppressWarnings("all") java.lang.String toString() {
     return "Data5()";
   }
-}
-final @Data class Data6 {
-  public @java.lang.SuppressWarnings("all") Data6() {
+  public @java.lang.SuppressWarnings("all") Data5() {
     super();
   }
+}
+final @Data class Data6 {
   public @java.lang.Override @java.lang.SuppressWarnings("all") boolean equals(final java.lang.Object o) {
     if ((o == this))
         return true;
@@ -207,5 +213,8 @@ final @Data class Data6 {
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") java.lang.String toString() {
     return "Data6()";
+  }
+  public @java.lang.SuppressWarnings("all") Data6() {
+    super();
   }
 }

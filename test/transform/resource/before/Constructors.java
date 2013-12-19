@@ -10,6 +10,10 @@
 	final int x;
 	String name;
 }
+@lombok.RequiredArgsConstructor(onConstructor=@__(@Deprecated)) class RequiredArgsConstructorWithAnnotations {
+	final int x;
+	String name;
+}
 @lombok.AllArgsConstructor class AllArgsConstructor1 {
 	final int x;
 	String name;
@@ -20,5 +24,9 @@
 }
 @lombok.RequiredArgsConstructor(staticName="of") class RequiredArgsConstructorStaticNameGenerics<T extends Number> {
 	final T x;
+	String name;
+}
+@lombok.RequiredArgsConstructor(staticName="of") class RequiredArgsConstructorStaticNameGenerics2<T extends Number> {
+	final Class<T> x;
 	String name;
 }

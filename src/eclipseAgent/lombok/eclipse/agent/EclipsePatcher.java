@@ -21,6 +21,8 @@
  */
 package lombok.eclipse.agent;
 
+import static lombok.patcher.scripts.ScriptBuilder.*;
+
 import java.lang.instrument.Instrumentation;
 import java.util.Collection;
 import java.util.Collections;
@@ -94,6 +96,7 @@ public class EclipsePatcher extends Agent {
 			patchSortMembersOperation(sm);
 			patchExtractInterface(sm);
 			patchAboutDialog(sm);
+			patchEclipseDebugPatches(sm);
 		} else {
 			patchPostCompileHookEcj(sm);
 		}
@@ -101,6 +104,7 @@ public class EclipsePatcher extends Agent {
 		patchAvoidReparsingGeneratedCode(sm);
 		patchLombokizeAST(sm);
 		patchEcjTransformers(sm, ecjOnly);
+		patchExtensionMethod(sm, ecjOnly);
 		
 		if (reloadExistingClasses) sm.reloadClasses(instrumentation);
 	}
@@ -221,31 +225,31 @@ public class EclipsePatcher extends Agent {
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.CompilationUnit", "types", "java.util.List"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedNodes", "java.util.List", "java.util.List"))
 				.transplant().build());
-
+		
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.SortElementsOperation$2", "visit", "boolean", "org.eclipse.jdt.core.dom.AnnotationTypeDeclaration"))
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.AnnotationTypeDeclaration", "bodyDeclarations", "java.util.List"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedNodes", "java.util.List", "java.util.List"))
 				.transplant().build());
-
+		
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.SortElementsOperation$2", "visit", "boolean", "org.eclipse.jdt.core.dom.AnonymousClassDeclaration"))
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.AnonymousClassDeclaration", "bodyDeclarations", "java.util.List"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedNodes", "java.util.List", "java.util.List"))
 				.transplant().build());
-
+		
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.SortElementsOperation$2", "visit", "boolean", "org.eclipse.jdt.core.dom.TypeDeclaration"))
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.TypeDeclaration", "bodyDeclarations", "java.util.List"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedNodes", "java.util.List", "java.util.List"))
 				.transplant().build());
-
+		
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.SortElementsOperation$2", "visit", "boolean", "org.eclipse.jdt.core.dom.EnumDeclaration"))
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.EnumDeclaration", "bodyDeclarations", "java.util.List"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedNodes", "java.util.List", "java.util.List"))
 				.transplant().build());
-	
+		
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.SortElementsOperation$2", "visit", "boolean", "org.eclipse.jdt.core.dom.EnumDeclaration"))
 				.methodToWrap(new Hook("org.eclipse.jdt.core.dom.EnumDeclaration", "enumConstants", "java.util.List"))
@@ -263,7 +267,7 @@ public class EclipsePatcher extends Agent {
 				.build());
 		
 	}
-
+	
 	private static void patchPostCompileHookEclipse(ScriptManager sm) {
 		sm.addScript(ScriptBuilder.wrapMethodCall()
 				.target(new MethodTarget("org.eclipse.jdt.internal.core.builder.IncrementalImageBuilder", "writeClassFileContents"))
@@ -271,7 +275,6 @@ public class EclipsePatcher extends Agent {
 				.methodToWrap(new Hook("org.eclipse.jdt.internal.compiler.ClassFile", "getBytes", "byte[]"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "runPostCompiler", "byte[]", "byte[]", "java.lang.String"))
 				.requestExtra(StackRequest.PARAM3)
-				.transplant()
 				.build());
 	}
 	
@@ -325,6 +328,14 @@ public class EclipsePatcher extends Agent {
 				.methodToWrap(new Hook("org.eclipse.jdt.core.IType", "getMethods", "org.eclipse.jdt.core.IMethod[]"))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "removeGeneratedMethods", "org.eclipse.jdt.core.IMethod[]",
 						"org.eclipse.jdt.core.IMethod[]"))
+				.transplant().build());
+		
+		sm.addScript(ScriptBuilder.exitEarly()
+				.target(new MethodTarget("org.eclipse.jdt.internal.corext.refactoring.rename.TempOccurrenceAnalyzer", "visit", "boolean", "org.eclipse.jdt.core.dom.SimpleName"))
+				.target(new MethodTarget("org.eclipse.jdt.internal.corext.refactoring.rename.RenameAnalyzeUtil$ProblemNodeFinder$NameNodeVisitor", "visit", "boolean", "org.eclipse.jdt.core.dom.SimpleName"))
+				.decisionMethod(new Hook("lombok.eclipse.agent.PatchFixes", "isGenerated", "boolean", "org.eclipse.jdt.core.dom.ASTNode"))
+				.valueMethod(new Hook("lombok.eclipse.agent.PatchFixes", "returnTrue", "boolean", "java.lang.Object"))
+				.request(StackRequest.PARAM1)
 				.transplant().build());
 	}
 	
@@ -538,7 +549,7 @@ public class EclipsePatcher extends Agent {
 		sm.addScript(ScriptBuilder.exitEarly()
 				.target(new MethodTarget(CLASSSCOPE_SIG, "buildFieldsAndMethods", "void"))
 				.request(StackRequest.THIS)
-				.decisionMethod(new Hook(PatchDelegate.class.getName(), "handleDelegateForType", "boolean", CLASSSCOPE_SIG))
+				.decisionMethod(new Hook("lombok.eclipse.agent.PatchDelegatePortal", "handleDelegateForType", "boolean", "java.lang.Object"))
 				.build());
 	}
 	
@@ -632,5 +643,59 @@ public class EclipsePatcher extends Agent {
 				.target(new MethodTarget(SOURCE_TYPE_CONVERTER_SIG, "convertAnnotations", ANNOTATION_SIG + "[]", I_ANNOTATABLE_SIG))
 				.wrapMethod(new Hook("lombok.eclipse.agent.PatchFixes", "convertAnnotations", ANNOTATION_SIG + "[]", ANNOTATION_SIG + "[]", I_ANNOTATABLE_SIG))
 				.request(StackRequest.PARAM1, StackRequest.RETURN_VALUE).build());
+	}
+	
+	private static void patchEclipseDebugPatches(ScriptManager sm) {
+		final String ASTNODE_SIG = "org.eclipse.jdt.core.dom.ASTNode";
+		final String PATCH_DEBUG = "lombok.eclipse.agent.PatchDiagnostics";
+		
+		sm.addScript(exitEarly()
+				.target(new MethodTarget(ASTNODE_SIG, "setSourceRange", "void", "int", "int"))
+				.request(StackRequest.THIS)
+				.request(StackRequest.PARAM1)
+				.request(StackRequest.PARAM2)
+				.decisionMethod(new Hook(PATCH_DEBUG, "setSourceRangeCheck", "boolean", "java.lang.Object", "int", "int"))
+				.build());
+	}
+	
+	private static void patchExtensionMethod(ScriptManager sm, boolean ecj) {
+		final String PATCH_EXTENSIONMETHOD = "lombok.eclipse.agent.PatchExtensionMethod";
+		final String PATCH_EXTENSIONMETHOD_COMPLETIONPROPOSAL_PORTAL = "lombok.eclipse.agent.PatchExtensionMethodCompletionProposalPortal";
+		final String MESSAGE_SEND_SIG = "org.eclipse.jdt.internal.compiler.ast.MessageSend";
+		final String TYPE_BINDING_SIG = "org.eclipse.jdt.internal.compiler.lookup.TypeBinding";
+		final String BLOCK_SCOPE_SIG = "org.eclipse.jdt.internal.compiler.lookup.BlockScope";
+		final String TYPE_BINDINGS_SIG = "org.eclipse.jdt.internal.compiler.lookup.TypeBinding[]";
+		final String PROBLEM_REPORTER_SIG = "org.eclipse.jdt.internal.compiler.problem.ProblemReporter";
+		final String METHOD_BINDING_SIG = "org.eclipse.jdt.internal.compiler.lookup.MethodBinding";
+		final String COMPLETION_PROPOSAL_COLLECTOR_SIG = "org.eclipse.jdt.ui.text.java.CompletionProposalCollector";
+		final String I_JAVA_COMPLETION_PROPOSAL_SIG = "org.eclipse.jdt.ui.text.java.IJavaCompletionProposal[]";
+		
+		sm.addScript(wrapReturnValue()
+			.target(new MethodTarget(MESSAGE_SEND_SIG, "resolveType", TYPE_BINDING_SIG, BLOCK_SCOPE_SIG))
+			.request(StackRequest.RETURN_VALUE)
+			.request(StackRequest.THIS)
+			.request(StackRequest.PARAM1)
+			.wrapMethod(new Hook(PATCH_EXTENSIONMETHOD, "resolveType", TYPE_BINDING_SIG, TYPE_BINDING_SIG, MESSAGE_SEND_SIG, BLOCK_SCOPE_SIG))
+			.build());
+		sm.addScript(replaceMethodCall()
+			.target(new MethodTarget(MESSAGE_SEND_SIG, "resolveType", TYPE_BINDING_SIG, BLOCK_SCOPE_SIG))
+			.methodToReplace(new Hook(PROBLEM_REPORTER_SIG, "errorNoMethodFor", "void", MESSAGE_SEND_SIG, TYPE_BINDING_SIG, TYPE_BINDINGS_SIG))
+			.replacementMethod(new Hook(PATCH_EXTENSIONMETHOD, "errorNoMethodFor", "void", PROBLEM_REPORTER_SIG, MESSAGE_SEND_SIG, TYPE_BINDING_SIG, TYPE_BINDINGS_SIG))
+			.build());
+		
+		sm.addScript(replaceMethodCall()
+			.target(new MethodTarget(MESSAGE_SEND_SIG, "resolveType", TYPE_BINDING_SIG, BLOCK_SCOPE_SIG))
+			.methodToReplace(new Hook(PROBLEM_REPORTER_SIG, "invalidMethod", "void", MESSAGE_SEND_SIG, METHOD_BINDING_SIG))
+			.replacementMethod(new Hook(PATCH_EXTENSIONMETHOD, "invalidMethod", "void", PROBLEM_REPORTER_SIG, MESSAGE_SEND_SIG, METHOD_BINDING_SIG))
+			.build());
+		
+		if (!ecj) {
+			sm.addScript(wrapReturnValue()
+				.target(new MethodTarget(COMPLETION_PROPOSAL_COLLECTOR_SIG, "getJavaCompletionProposals", I_JAVA_COMPLETION_PROPOSAL_SIG))
+				.request(StackRequest.RETURN_VALUE)
+				.request(StackRequest.THIS)
+				.wrapMethod(new Hook(PATCH_EXTENSIONMETHOD_COMPLETIONPROPOSAL_PORTAL, "getJavaCompletionProposals", I_JAVA_COMPLETION_PROPOSAL_SIG, "java.lang.Object[]", "java.lang.Object"))
+				.build());
+		}
 	}
 }

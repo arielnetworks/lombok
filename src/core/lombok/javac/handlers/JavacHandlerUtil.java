@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2012 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  */
 package lombok.javac.handlers;
 
+import static lombok.core.TransformationsUtil.INVALID_ON_BUILDERS;
 import static lombok.javac.Javac.*;
 
 import java.lang.annotation.Annotation;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import lombok.AccessLevel;
@@ -41,18 +43,26 @@ import lombok.core.AnnotationValues;
 import lombok.core.AnnotationValues.AnnotationValue;
 import lombok.core.TransformationsUtil;
 import lombok.core.TypeResolver;
+import lombok.delombok.LombokOptionsFactory;
 import lombok.experimental.Accessors;
 import lombok.javac.Javac;
 import lombok.javac.JavacNode;
+import lombok.javac.JavacTreeMaker;
 
+import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.TypeTags;
+import com.sun.tools.javac.parser.Tokens.Comment;
+import com.sun.tools.javac.tree.DocCommentTable;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
+import com.sun.tools.javac.tree.JCTree.JCArrayTypeTree;
 import com.sun.tools.javac.tree.JCTree.JCAssign;
+import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
+import com.sun.tools.javac.tree.JCTree.JCExpressionStatement;
+import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.tree.JCTree.JCImport;
 import com.sun.tools.javac.tree.JCTree.JCLiteral;
@@ -60,14 +70,20 @@ import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.tree.JCTree.JCNewArray;
+import com.sun.tools.javac.tree.JCTree.JCPrimitiveTypeTree;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
+import com.sun.tools.javac.tree.JCTree.JCTypeApply;
+import com.sun.tools.javac.tree.JCTree.JCTypeParameter;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
-import com.sun.tools.javac.tree.TreeMaker;
+import com.sun.tools.javac.tree.JCTree.JCWildcard;
+import com.sun.tools.javac.tree.JCTree.TypeBoundKind;
 import com.sun.tools.javac.tree.TreeScanner;
+import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Name;
+import com.sun.tools.javac.util.Options;
 
 /**
  * Container for static utility methods useful to handlers written for javac.
@@ -79,18 +95,35 @@ public class JavacHandlerUtil {
 	
 	private static class MarkingScanner extends TreeScanner {
 		private final JCTree source;
+		private final Context context;
 		
-		MarkingScanner(JCTree source) {
+		MarkingScanner(JCTree source, Context context) {
 			this.source = source;
+			this.context = context;
 		}
 		
 		@Override public void scan(JCTree tree) {
-			setGeneratedBy(tree, source);
+			if (tree == null) return;
+			setGeneratedBy(tree, source, context);
 			super.scan(tree);
 		}
 	}
 	
 	private static Map<JCTree, WeakReference<JCTree>> generatedNodes = new WeakHashMap<JCTree, WeakReference<JCTree>>();
+	
+	/**
+	 * Contributed by Jan Lahoda; many lombok transformations should not be run (or a lite version should be run) when the netbeans editor
+	 * is running javac on the open source file to find inline errors and such. As class files are compiled separately this does not affect
+	 * actual runtime behaviour or file output of the netbeans IDE.
+	 */
+	public static boolean inNetbeansEditor(JavacNode node) {
+		return inNetbeansEditor(node.getContext());
+	}
+	
+	private static boolean inNetbeansEditor(Context context) {
+		Options options = Options.instance(context);
+		return (options.keySet().contains("ide") && !options.keySet().contains("backgroundCompilation"));
+	}
 	
 	public static JCTree getGeneratedBy(JCTree node) {
 		synchronized (generatedNodes) {
@@ -103,19 +136,50 @@ public class JavacHandlerUtil {
 		return getGeneratedBy(node) != null;
 	}
 	
-	public static <T extends JCTree> T recursiveSetGeneratedBy(T node, JCTree source) {
-		setGeneratedBy(node, source);
-		node.accept(new MarkingScanner(source));
-		
+	public static <T extends JCTree> T recursiveSetGeneratedBy(T node, JCTree source, Context context) {
+		if (node == null) return null;
+		setGeneratedBy(node, source, context);
+		node.accept(new MarkingScanner(source, context));
 		return node;
 	}
 	
-	public static <T extends JCTree> T setGeneratedBy(T node, JCTree source) {
+	public static <T extends JCTree> T setGeneratedBy(T node, JCTree source, Context context) {
+		if (node == null) return null;
 		synchronized (generatedNodes) {
 			if (source == null) generatedNodes.remove(node);
 			else generatedNodes.put(node, new WeakReference<JCTree>(source));
 		}
+		if (source != null && !inNetbeansEditor(context)) node.pos = source.pos;
 		return node;
+	}
+	
+	public static boolean hasAnnotation(Class<? extends Annotation> type, JavacNode node) {
+		return hasAnnotation(type, node, false);
+	}
+	
+	public static boolean hasAnnotationAndDeleteIfNeccessary(Class<? extends Annotation> type, JavacNode node) {
+		return hasAnnotation(type, node, true);
+	}
+	
+	private static boolean hasAnnotation(Class<? extends Annotation> type, JavacNode node, boolean delete) {
+		if (node == null) return false;
+		if (type == null) return false;
+		switch (node.getKind()) {
+		case ARGUMENT:
+		case FIELD:
+		case LOCAL:
+		case TYPE:
+		case METHOD:
+			for (JavacNode child : node.down()) {
+				if (annotationTypeMatches(type, child)) {
+					if (delete) deleteAnnotationIfNeccessary(child, type);
+					return true;
+				}
+			}
+			// intentional fallthrough
+		default:
+			return false;
+		}
 	}
 	
 	/**
@@ -139,7 +203,7 @@ public class JavacHandlerUtil {
 	public static boolean typeMatches(Class<?> type, JavacNode node, JCTree typeNode) {
 		String typeName = typeNode.toString();
 		
-		TypeResolver resolver = new TypeResolver(node.getPackageDeclaration(), node.getImportStatements());
+		TypeResolver resolver = new TypeResolver(node.getImportList());
 		return resolver.typeMatches(node, type.getName(), typeName);
 	}
 	
@@ -158,6 +222,17 @@ public class JavacHandlerUtil {
 				return true;
 			}
 		}
+		return false;
+	}
+	
+	/**
+	 * Returns if a node is marked deprecated (as picked up on by the parser).
+	 * @param node the node to check (type, method, or field decl).
+	 */
+	public static boolean nodeHasDeprecatedFlag(JCTree node) {
+		if (node instanceof JCVariableDecl) return (((JCVariableDecl) node).mods.flags & Flags.DEPRECATED) != 0;
+		if (node instanceof JCMethodDecl) return (((JCMethodDecl) node).mods.flags & Flags.DEPRECATED) != 0;
+		if (node instanceof JCClassDecl) return (((JCClassDecl) node).mods.flags & Flags.DEPRECATED) != 0;
 		return false;
 	}
 	
@@ -231,7 +306,23 @@ public class JavacHandlerUtil {
 	 * then removes any import statement that imports this exact annotation (not star imports).
 	 * Only does this if the DeleteLombokAnnotations class is in the context.
 	 */
+	@SuppressWarnings("unchecked")
 	public static void deleteAnnotationIfNeccessary(JavacNode annotation, Class<? extends Annotation> annotationType) {
+		deleteAnnotationIfNeccessary0(annotation, annotationType);
+	}
+	
+	/**
+	 * Removes the annotation from javac's AST (it remains in lombok's AST),
+	 * then removes any import statement that imports this exact annotation (not star imports).
+	 * Only does this if the DeleteLombokAnnotations class is in the context.
+	 */
+	@SuppressWarnings("unchecked")
+	public static void deleteAnnotationIfNeccessary(JavacNode annotation, Class<? extends Annotation> annotationType1, Class<? extends Annotation> annotationType2) {
+		deleteAnnotationIfNeccessary0(annotation, annotationType1, annotationType2);
+	}
+	
+	private static void deleteAnnotationIfNeccessary0(JavacNode annotation, Class<? extends Annotation>... annotationTypes) {
+		if (inNetbeansEditor(annotation)) return;
 		if (!annotation.shouldDeleteLombokAnnotations()) return;
 		JavacNode parentNode = annotation.directUp();
 		switch (parentNode.getKind()) {
@@ -258,12 +349,16 @@ public class JavacHandlerUtil {
 			return;
 		}
 		
-		deleteImportFromCompilationUnit(annotation, annotationType.getName());
+		parentNode.getAst().setChanged();
+		for (Class<?> annotationType : annotationTypes) {
+			deleteImportFromCompilationUnit(annotation, annotationType.getName());
+		}
 	}
 	
 	public static void deleteImportFromCompilationUnit(JavacNode node, String name) {
+		if (inNetbeansEditor(node)) return;
 		if (!node.shouldDeleteLombokAnnotations()) return;
-		ListBuffer<JCTree> newDefs = ListBuffer.lb();
+		ListBuffer<JCTree> newDefs = new ListBuffer<JCTree>();
 		
 		JCCompilationUnit unit = (JCCompilationUnit) node.top().get();
 		
@@ -279,7 +374,7 @@ public class JavacHandlerUtil {
 	}
 
 	private static List<JCAnnotation> filterList(List<JCAnnotation> annotations, JCTree jcTree) {
-		ListBuffer<JCAnnotation> newAnnotations = ListBuffer.lb();
+		ListBuffer<JCAnnotation> newAnnotations = new ListBuffer<JCAnnotation>();
 		for (JCAnnotation ann : annotations) {
 			if (jcTree != ann) newAnnotations.append(ann);
 		}
@@ -296,11 +391,7 @@ public class JavacHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllGetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllGetterNames(JavacNode field) {
-		String fieldName = field.getName();
-		boolean isBoolean = isBoolean(field);
-		AnnotationValues<Accessors> accessors = JavacHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllGetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllGetterNames(getAccessorsForField(field), field.getName(), isBoolean(field));
 	}
 	
 	/**
@@ -309,11 +400,7 @@ public class JavacHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toGetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toGetterName(JavacNode field) {
-		String fieldName = field.getName();
-		boolean isBoolean = isBoolean(field);
-		AnnotationValues<Accessors> accessors = JavacHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toGetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toGetterName(getAccessorsForField(field), field.getName(), isBoolean(field));
 	}
 	
 	/**
@@ -321,11 +408,7 @@ public class JavacHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllSetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllSetterNames(JavacNode field) {
-		String fieldName = field.getName();
-		boolean isBoolean = isBoolean(field);
-		AnnotationValues<Accessors> accessors = JavacHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllSetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllSetterNames(getAccessorsForField(field), field.getName(), isBoolean(field));
 	}
 	
 	/**
@@ -334,11 +417,24 @@ public class JavacHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toSetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toSetterName(JavacNode field) {
-		String fieldName = field.getName();
-		boolean isBoolean = isBoolean(field);
-		AnnotationValues<Accessors> accessors = JavacHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toSetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toSetterName(getAccessorsForField(field), field.getName(), isBoolean(field));
+	}
+	
+	/**
+	 * Translates the given field into all possible wither names.
+	 * Convenient wrapper around {@link TransformationsUtil#toAllWitherNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static java.util.List<String> toAllWitherNames(JavacNode field) {
+		return TransformationsUtil.toAllWitherNames(getAccessorsForField(field), field.getName(), isBoolean(field));
+	}
+	
+	/**
+	 * @return the likely wither name for the stated field. (e.g. private boolean foo; to withFoo).
+	 * 
+	 * Convenient wrapper around {@link TransformationsUtil#toWitherName(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static String toWitherName(JavacNode field) {
+		return TransformationsUtil.toWitherName(getAccessorsForField(field), field.getName(), isBoolean(field));
 	}
 	
 	/**
@@ -355,9 +451,64 @@ public class JavacHandlerUtil {
 		return instance.chain() || (instance.fluent() && !forced);
 	}
 	
-	private static boolean isBoolean(JavacNode field) {
+	public static JCExpression cloneSelfType(JavacNode field) {
+		JavacNode typeNode = field;
+		JavacTreeMaker maker = field.getTreeMaker();
+		while (typeNode != null && typeNode.getKind() != Kind.TYPE) typeNode = typeNode.up();
+		if (typeNode != null && typeNode.get() instanceof JCClassDecl) {
+			JCClassDecl type = (JCClassDecl) typeNode.get();
+			ListBuffer<JCExpression> typeArgs = new ListBuffer<JCExpression>();
+			if (!type.typarams.isEmpty()) {
+				for (JCTypeParameter tp : type.typarams) {
+					typeArgs.append(maker.Ident(tp.name));
+				}
+				return maker.TypeApply(maker.Ident(type.name), typeArgs.toList());
+			} else {
+				return maker.Ident(type.name);
+			}
+		} else {
+			return null;
+		}
+	}
+	
+	public static boolean isBoolean(JavacNode field) {
 		JCExpression varType = ((JCVariableDecl) field.get()).vartype;
+		return isBoolean(varType);
+	}
+	
+	public static boolean isBoolean(JCExpression varType) {
 		return varType != null && varType.toString().equals("boolean");
+	}
+	
+	public static Name removePrefixFromField(JavacNode field) {
+		String[] prefixes = null;
+		for (JavacNode node : field.down()) {
+			if (annotationTypeMatches(Accessors.class, node)) {
+				prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+				break;
+			}
+		}
+		
+		if (prefixes == null) {
+			JavacNode current = field.up();
+			outer:
+			while (current != null) {
+				for (JavacNode node : current.down()) {
+					if (annotationTypeMatches(Accessors.class, node)) {
+						prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+						break outer;
+					}
+				}
+				current = current.up();
+			}
+		}
+		
+		if (prefixes != null && prefixes.length > 0) {
+			CharSequence newName = TransformationsUtil.removePrefix(field.getName(), prefixes);
+			if (newName != null) return field.toName(newName.toString());
+		}
+		
+		return ((JCVariableDecl) field.get()).name;
 	}
 	
 	public static AnnotationValues<Accessors> getAccessorsForField(JavacNode field) {
@@ -387,9 +538,7 @@ public class JavacHandlerUtil {
 	 * @param node Any node that represents the Type (JCClassDecl) to look in, or any child node thereof.
 	 */
 	public static MemberExistsResult fieldExists(String fieldName, JavacNode node) {
-		while (node != null && !(node.get() instanceof JCClassDecl)) {
-			node = node.up();
-		}
+		node = upToTypeNode(node);
 		
 		if (node != null && node.get() instanceof JCClassDecl) {
 			for (JCTree def : ((JCClassDecl)node.get()).defs) {
@@ -418,9 +567,7 @@ public class JavacHandlerUtil {
 	 * @param params The number of parameters the method should have; varargs count as 0-*. Set to -1 to find any method with the appropriate name regardless of parameter count.
 	 */
 	public static MemberExistsResult methodExists(String methodName, JavacNode node, boolean caseSensitive, int params) {
-		while (node != null && !(node.get() instanceof JCClassDecl)) {
-			node = node.up();
-		}
+		node = upToTypeNode(node);
 		
 		if (node != null && node.get() instanceof JCClassDecl) {
 			for (JCTree def : ((JCClassDecl)node.get()).defs) {
@@ -461,9 +608,7 @@ public class JavacHandlerUtil {
 	 * @param node Any node that represents the Type (JCClassDecl) to look in, or any child node thereof.
 	 */
 	public static MemberExistsResult constructorExists(JavacNode node) {
-		while (node != null && !(node.get() instanceof JCClassDecl)) {
-			node = node.up();
-		}
+		node = upToTypeNode(node);
 		
 		if (node != null && node.get() instanceof JCClassDecl) {
 			for (JCTree def : ((JCClassDecl)node.get()).defs) {
@@ -477,6 +622,23 @@ public class JavacHandlerUtil {
 		}
 		
 		return MemberExistsResult.NOT_EXISTS;
+	}
+	
+	public static boolean isConstructorCall(final JCStatement statement) {
+		if (!(statement instanceof JCExpressionStatement)) return false;
+		JCExpression expr = ((JCExpressionStatement) statement).expr;
+		if (!(expr instanceof JCMethodInvocation)) return false;
+		JCExpression invocation = ((JCMethodInvocation) expr).meth;
+		String name;
+		if (invocation instanceof JCFieldAccess) {
+			name = ((JCFieldAccess) invocation).name.toString();
+		} else if (invocation instanceof JCIdent) {
+			name = ((JCIdent) invocation).name.toString();
+		} else {
+			name = "";
+		}
+		
+		return "super".equals(name) || "this".equals(name);
 	}
 	
 	/**
@@ -561,7 +723,7 @@ public class JavacHandlerUtil {
 		return null;
 	}
 	
-	enum FieldAccess {
+	public enum FieldAccess {
 		GETTER, PREFER_FIELD, ALWAYS_FIELD;
 	}
 	
@@ -583,7 +745,7 @@ public class JavacHandlerUtil {
 	/**
 	 * Returns the type of the field, unless a getter exists for this field, in which case the return type of the getter is returned.
 	 * 
-	 * @see #createFieldAccessor(TreeMaker, JavacNode)
+	 * @see #createFieldAccessor(TreeMaker, JavacNode, FieldAccess)
 	 */
 	static JCExpression getFieldType(JavacNode field, FieldAccess fieldAccess) {
 		boolean lookForGetter = lookForGetter(field, fieldAccess);
@@ -600,11 +762,11 @@ public class JavacHandlerUtil {
 	/**
 	 * Creates an expression that reads the field. Will either be {@code this.field} or {@code this.getField()} depending on whether or not there's a getter.
 	 */
-	static JCExpression createFieldAccessor(TreeMaker maker, JavacNode field, FieldAccess fieldAccess) {
+	static JCExpression createFieldAccessor(JavacTreeMaker maker, JavacNode field, FieldAccess fieldAccess) {
 		return createFieldAccessor(maker, field, fieldAccess, null);
 	}
 	
-	static JCExpression createFieldAccessor(TreeMaker maker, JavacNode field, FieldAccess fieldAccess, JCExpression receiver) {
+	static JCExpression createFieldAccessor(JavacTreeMaker maker, JavacNode field, FieldAccess fieldAccess, JCExpression receiver) {
 		boolean lookForGetter = lookForGetter(field, fieldAccess);
 		
 		GetterMethod getter = lookForGetter ? findGetter(field) : null;
@@ -646,14 +808,14 @@ public class JavacHandlerUtil {
 	 * 
 	 * Also takes care of updating the JavacAST.
 	 */
-	public static void injectField(JavacNode typeNode, JCVariableDecl field) {
-		injectField(typeNode, field, false);
+	public static JavacNode injectField(JavacNode typeNode, JCVariableDecl field) {
+		return injectField(typeNode, field, false);
 	}
 
-	private static void injectField(JavacNode typeNode, JCVariableDecl field, boolean addSuppressWarnings) {
+	private static JavacNode injectField(JavacNode typeNode, JCVariableDecl field, boolean addSuppressWarnings) {
 		JCClassDecl type = (JCClassDecl) typeNode.get();
 		
-		if (addSuppressWarnings) addSuppressWarningsAll(field.mods, typeNode, field.pos, getGeneratedBy(field));
+		if (addSuppressWarnings) addSuppressWarningsAll(field.mods, typeNode, field.pos, getGeneratedBy(field), typeNode.getContext());
 		
 		List<JCTree> insertAfter = null;
 		List<JCTree> insertBefore = type.defs;
@@ -676,7 +838,7 @@ public class JavacHandlerUtil {
 			insertAfter.tail = fieldEntry;
 		}
 		
-		typeNode.add(field, Kind.FIELD);
+		return typeNode.add(field, Kind.FIELD);
 	}
 	
 	private static boolean isEnumConstant(final JCVariableDecl field) {
@@ -711,25 +873,63 @@ public class JavacHandlerUtil {
 			}
 		}
 		
-		addSuppressWarningsAll(method.mods, typeNode, method.pos, getGeneratedBy(method));
+		addSuppressWarningsAll(method.mods, typeNode, method.pos, getGeneratedBy(method), typeNode.getContext());
 		type.defs = type.defs.append(method);
 		
 		typeNode.add(method, Kind.METHOD);
 	}
 	
-	private static void addSuppressWarningsAll(JCModifiers mods, JavacNode node, int pos, JCTree source) {
-		TreeMaker maker = node.getTreeMaker();
-		JCExpression suppressWarningsType = chainDots(node, "java", "lang", "SuppressWarnings");
+	/**
+	 * Adds an inner type (class, interface, enum) to the given type. Cannot inject top-level types.
+	 * 
+	 * @param typeNode parent type to inject new type into
+	 * @param type New type (class, interface, etc) to inject.
+	 * @return 
+	 */
+	public static JavacNode injectType(JavacNode typeNode, final JCClassDecl type) {
+		JCClassDecl typeDecl = (JCClassDecl) typeNode.get();
+		addSuppressWarningsAll(type.mods, typeNode, type.pos, getGeneratedBy(type), typeNode.getContext());
+		typeDecl.defs = typeDecl.defs.append(type);
+		return typeNode.add(type, Kind.TYPE);
+	}
+	
+	public static long addFinalIfNeeded(long flags, Context context) {
+		boolean addFinal = LombokOptionsFactory.getDelombokOptions(context).getFormatPreferences().generateFinalParams();
+		
+		if (addFinal) flags |= Flags.FINAL;
+		return flags;
+	}
+	
+	public static JCExpression genJavaLangTypeRef(JavacNode node, String... simpleNames) {
+		if (LombokOptionsFactory.getDelombokOptions(node.getContext()).getFormatPreferences().javaLangAsFqn()) {
+			return chainDots(node, "java", "lang", simpleNames);
+		} else {
+			return chainDots(node, null, null, simpleNames);
+		}
+	}
+	
+	public static JCExpression genJavaLangTypeRef(JavacNode node, int pos, String... simpleNames) {
+		if (LombokOptionsFactory.getDelombokOptions(node.getContext()).getFormatPreferences().javaLangAsFqn()) {
+			return chainDots(node, pos, "java", "lang", simpleNames);
+		} else {
+			return chainDots(node, pos, null, null, simpleNames);
+		}
+	}
+	
+	private static void addSuppressWarningsAll(JCModifiers mods, JavacNode node, int pos, JCTree source, Context context) {
+		if (!LombokOptionsFactory.getDelombokOptions(context).getFormatPreferences().generateSuppressWarnings()) return;
+		JavacTreeMaker maker = node.getTreeMaker();
+		JCExpression suppressWarningsType = genJavaLangTypeRef(node, "SuppressWarnings");
 		JCLiteral allLiteral = maker.Literal("all");
 		suppressWarningsType.pos = pos;
 		allLiteral.pos = pos;
-		JCAnnotation annotation = recursiveSetGeneratedBy(maker.Annotation(suppressWarningsType, List.<JCExpression>of(allLiteral)), source);
+		JCAnnotation annotation = recursiveSetGeneratedBy(maker.Annotation(suppressWarningsType, List.<JCExpression>of(allLiteral)), source, context);
 		annotation.pos = pos;
 		mods.annotations = mods.annotations.append(annotation);
 	}
 	
 	private static List<JCTree> addAllButOne(List<JCTree> defs, int idx) {
-		ListBuffer<JCTree> out = ListBuffer.lb();
+		ListBuffer<JCTree> out = new ListBuffer<JCTree>();
 		int i = 0;
 		for (JCTree def : defs) {
 			if (i++ != idx) out.append(def);
@@ -741,20 +941,47 @@ public class JavacHandlerUtil {
 	 * In javac, dotted access of any kind, from {@code java.lang.String} to {@code var.methodName}
 	 * is represented by a fold-left of {@code Select} nodes with the leftmost string represented by
 	 * a {@code Ident} node. This method generates such an expression.
+	 * <p>
+	 * The position of the generated node(s) will be unpositioned (-1).
 	 * 
 	 * For example, maker.Select(maker.Select(maker.Ident(NAME[java]), NAME[lang]), NAME[String]).
 	 * 
 	 * @see com.sun.tools.javac.tree.JCTree.JCIdent
 	 * @see com.sun.tools.javac.tree.JCTree.JCFieldAccess
 	 */
-	public static JCExpression chainDots(JavacNode node, String... elems) {
+	public static JCExpression chainDots(JavacNode node, String elem1, String elem2, String... elems) {
+		return chainDots(node, -1, elem1, elem2, elems);
+	}
+	
+	public static JCExpression chainDots(JavacNode node, String[] elems) {
+		return chainDots(node, -1, null, null, elems);
+	}
+	
+	/**
+	 * In javac, dotted access of any kind, from {@code java.lang.String} to {@code var.methodName}
+	 * is represented by a fold-left of {@code Select} nodes with the leftmost string represented by
+	 * a {@code Ident} node. This method generates such an expression.
+	 * <p>
+	 * The position of the generated node(s) will be equal to the {@code pos} parameter.
+	 *
+	 * For example, maker.Select(maker.Select(maker.Ident(NAME[java]), NAME[lang]), NAME[String]).
+	 * 
+	 * @see com.sun.tools.javac.tree.JCTree.JCIdent
+	 * @see com.sun.tools.javac.tree.JCTree.JCFieldAccess
+	 */
+	public static JCExpression chainDots(JavacNode node, int pos, String elem1, String elem2, String... elems) {
 		assert elems != null;
-		assert elems.length > 0;
 		
-		JCExpression e = node.getTreeMaker().Ident(node.toName(elems[0]));
-		for (int i = 1 ; i < elems.length ; i++) {
-			e = node.getTreeMaker().Select(e, node.toName(elems[i]));
+		JavacTreeMaker maker = node.getTreeMaker();
+		if (pos != -1) maker = maker.at(pos);
+		JCExpression e = null;
+		if (elem1 != null) e = maker.Ident(node.toName(elem1));
+		if (elem2 != null) e = e == null ? maker.Ident(node.toName(elem2)) : maker.Select(e, node.toName(elem2));
+		for (int i = 0 ; i < elems.length ; i++) {
+			e = e == null ? maker.Ident(node.toName(elems[i])) : maker.Select(e, node.toName(elems[i]));
 		}
+		
+		assert e != null;
 		
 		return e;
 	}
@@ -771,7 +998,7 @@ public class JavacHandlerUtil {
 	 * @see com.sun.tools.javac.tree.JCTree.JCFieldAccess
 	 */
 	public static JCExpression chainDotsString(JavacNode node, String elems) {
-		return chainDots(node, elems.split("\\."));	
+		return chainDots(node, null, null, elems.split("\\."));
 	}
 	
 	/**
@@ -780,7 +1007,7 @@ public class JavacHandlerUtil {
 	 * Only the simple name is checked - the package and any containing class are ignored.
 	 */
 	public static List<JCAnnotation> findAnnotations(JavacNode fieldNode, Pattern namePattern) {
-		ListBuffer<JCAnnotation> result = ListBuffer.lb();
+		ListBuffer<JCAnnotation> result = new ListBuffer<JCAnnotation>();
 		for (JavacNode child : fieldNode.down()) {
 			if (child.getKind() == Kind.ANNOTATION) {
 				JCAnnotation annotation = (JCAnnotation) child.get();
@@ -799,14 +1026,15 @@ public class JavacHandlerUtil {
 	 * Generates a new statement that checks if the given variable is null, and if so, throws a {@code NullPointerException} with the
 	 * variable name as message.
 	 */
-	public static JCStatement generateNullCheck(TreeMaker treeMaker, JavacNode variable) {
+	public static JCStatement generateNullCheck(JavacTreeMaker maker, JavacNode variable) {
 		JCVariableDecl varDecl = (JCVariableDecl) variable.get();
 		if (isPrimitive(varDecl.vartype)) return null;
 		Name fieldName = varDecl.name;
-		JCExpression npe = chainDots(variable, "java", "lang", "NullPointerException");
-		JCTree exception = treeMaker.NewClass(null, List.<JCExpression>nil(), npe, List.<JCExpression>of(treeMaker.Literal(fieldName.toString())), null);
-		JCStatement throwStatement = treeMaker.Throw(exception);
-		return treeMaker.If(treeMaker.Binary(Javac.getCtcInt(JCTree.class, "EQ"), treeMaker.Ident(fieldName), treeMaker.Literal(Javac.getCtcInt(TypeTags.class, "BOT"), null)), throwStatement, null);
+		JCExpression npe = genJavaLangTypeRef(variable, "NullPointerException");
+		JCExpression exception = maker.NewClass(null, List.<JCExpression>nil(), npe, List.<JCExpression>of(maker.Literal(fieldName.toString())), null);
+		JCStatement throwStatement = maker.Throw(exception);
+		JCBlock throwBlock = maker.Block(0, List.of(throwStatement));
+		return maker.If(maker.Binary(CTC_EQUAL, maker.Ident(fieldName), maker.Literal(CTC_BOT, null)), throwBlock, null);
 	}
 	
 	/**
@@ -829,7 +1057,7 @@ public class JavacHandlerUtil {
 			if (idx > -1) matched[idx] = true;
 		}
 		
-		ListBuffer<Integer> problematic = ListBuffer.lb();
+		ListBuffer<Integer> problematic = new ListBuffer<Integer>();
 		for (int i = 0 ; i < list.size() ; i++) {
 			if (!matched[i]) problematic.append(i);
 		}
@@ -837,38 +1065,357 @@ public class JavacHandlerUtil {
 		return problematic.toList();
 	}
 	
-	static List<JCExpression> getAndRemoveAnnotationParameter(JCAnnotation ast, String parameterName) {
-		ListBuffer<JCExpression> params = ListBuffer.lb();
-		List<JCExpression> result = List.nil();
+	static List<JCAnnotation> unboxAndRemoveAnnotationParameter(JCAnnotation ast, String parameterName, String errorName, JavacNode errorNode) {
+		ListBuffer<JCExpression> params = new ListBuffer<JCExpression>();
+		ListBuffer<JCAnnotation> result = new ListBuffer<JCAnnotation>();
 		
+		errorNode.removeDeferredErrors();
+		
+		outer:
 		for (JCExpression param : ast.args) {
+			String nameOfParam = "value";
+			JCExpression valueOfParam = null;
 			if (param instanceof JCAssign) {
 				JCAssign assign = (JCAssign) param;
 				if (assign.lhs instanceof JCIdent) {
 					JCIdent ident = (JCIdent) assign.lhs;
-					if (parameterName.equals(ident.name.toString())) {
-						if (assign.rhs instanceof JCNewArray) {
-							result = ((JCNewArray) assign.rhs).elems;
-						} else {
-							result = result.append(assign.rhs);
-						}
-						continue;
-					}
+					nameOfParam = ident.name.toString();
 				}
+				valueOfParam = assign.rhs;
 			}
 			
-			params.append(param);
+			if (!parameterName.equals(nameOfParam)) {
+				params.append(param);
+				continue outer;
+			}
+			
+			if (valueOfParam instanceof JCAnnotation) {
+				String dummyAnnotationName = ((JCAnnotation) valueOfParam).annotationType.toString();
+				dummyAnnotationName = dummyAnnotationName.replace("_", "").replace("$", "").replace("x", "").replace("X", "");
+				if (dummyAnnotationName.length() > 0) {
+					errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+					continue outer;
+				}
+				for (JCExpression expr : ((JCAnnotation) valueOfParam).args) {
+					if (expr instanceof JCAssign && ((JCAssign) expr).lhs instanceof JCIdent) {
+						JCIdent id = (JCIdent) ((JCAssign) expr).lhs;
+						if ("value".equals(id.name.toString())) {
+							expr = ((JCAssign) expr).rhs;
+						} else {
+							errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+							continue outer;
+						}
+					}
+					
+					if (expr instanceof JCAnnotation) {
+						result.append((JCAnnotation) expr);
+					} else if (expr instanceof JCNewArray) {
+						for (JCExpression expr2 : ((JCNewArray) expr).elems) {
+							if (expr2 instanceof JCAnnotation) {
+								result.append((JCAnnotation) expr2);
+							} else {
+								errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+								continue outer;
+							}
+						}
+					} else {
+						errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+						continue outer;
+					}
+				}
+			} else {
+				if (valueOfParam instanceof JCNewArray && ((JCNewArray) valueOfParam).elems.isEmpty()) {
+					// Then we just remove it and move on (it's onMethod={} for example).
+				} else {
+					errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+				}
+			}
 		}
 		ast.args = params.toList();
-		return result;
+		return result.toList();
 	}
 	
-	static List<JCAnnotation> copyAnnotations(List<JCExpression> in) {
-		ListBuffer<JCAnnotation> out = ListBuffer.lb();
+	public static List<JCTypeParameter> copyTypeParams(JavacTreeMaker maker, List<JCTypeParameter> params) {
+		if (params == null || params.isEmpty()) return params;
+		ListBuffer<JCTypeParameter> out = new ListBuffer<JCTypeParameter>();
+		for (JCTypeParameter tp : params) out.append(maker.TypeParameter(tp.name, tp.bounds));
+		return out.toList();
+	}
+	
+	public static JCExpression namePlusTypeParamsToTypeReference(JavacTreeMaker maker, Name typeName, List<JCTypeParameter> params) {
+		ListBuffer<JCExpression> typeArgs = new ListBuffer<JCExpression>();
+		
+		if (!params.isEmpty()) {
+			for (JCTypeParameter param : params) {
+				typeArgs.append(maker.Ident(param.name));
+			}
+			
+			return maker.TypeApply(maker.Ident(typeName), typeArgs.toList());
+		}
+		
+		return maker.Ident(typeName);
+	}
+	
+	public static void sanityCheckForMethodGeneratingAnnotationsOnBuilderClass(JavacNode typeNode, JavacNode errorNode) {
+		List<String> disallowed = List.nil();
+		for (JavacNode child : typeNode.down()) {
+			for (Class<? extends java.lang.annotation.Annotation> annType : INVALID_ON_BUILDERS) {
+				if (annotationTypeMatches(annType, child)) {
+					disallowed = disallowed.append(annType.getSimpleName());
+				}
+			}
+		}
+		
+		int size = disallowed.size();
+		if (size == 0) return;
+		if (size == 1) {
+			errorNode.addError("@" + disallowed.head + " is not allowed on builder classes.");
+			return;
+		}
+		StringBuilder out = new StringBuilder();
+		for (String a : disallowed) out.append("@").append(a).append(", ");
+		out.setLength(out.length() - 2);
+		errorNode.addError(out.append(" are not allowed on builder classes.").toString());
+	}
+	
+	static List<JCAnnotation> copyAnnotations(List<? extends JCExpression> in) {
+		ListBuffer<JCAnnotation> out = new ListBuffer<JCAnnotation>();
 		for (JCExpression expr : in) {
 			if (!(expr instanceof JCAnnotation)) continue;
 			out.append((JCAnnotation) expr.clone());
 		}
 		return out.toList();
+	}
+	
+	static boolean isClass(JavacNode typeNode) {
+		return isClassAndDoesNotHaveFlags(typeNode, Flags.INTERFACE | Flags.ENUM | Flags.ANNOTATION);
+	}
+	
+	static boolean isClassOrEnum(JavacNode typeNode) {
+		return isClassAndDoesNotHaveFlags(typeNode, Flags.INTERFACE | Flags.ANNOTATION);
+	}
+	
+	private static boolean isClassAndDoesNotHaveFlags(JavacNode typeNode, int flags) {
+		JCClassDecl typeDecl = null;
+		if (typeNode.get() instanceof JCClassDecl) typeDecl = (JCClassDecl)typeNode.get();
+		else return false;
+		
+		long typeDeclflags = typeDecl == null ? 0 : typeDecl.mods.flags;
+		return (typeDeclflags & flags) == 0;
+	}
+	
+	public static JavacNode upToTypeNode(JavacNode node) {
+		if (node == null) throw new NullPointerException("node");
+		while ((node != null) && !(node.get() instanceof JCClassDecl)) node = node.up();
+		
+		return node;
+	}
+	
+	/**
+	 * Creates a full clone of a given javac AST type node. Every part is cloned (every identifier, every select, every wildcard, every type apply).
+	 * 
+	 * If there's any node in the tree that we don't know how to clone, that part isn't cloned. However, we wouldn't know what could possibly show up that we
+	 * can't currently clone; that's just a safeguard.
+	 * 
+	 * This should be used if the type looks the same in the code, but resolves differently. For example, a static method that has some generics in it named after
+	 * the class's own parameter, but as its a static method, the static method's notion of {@code T} is different from the class notion of {@code T}. If you're duplicating
+	 * a type used in the class context, you need to use this method.
+	 */
+	public static JCExpression cloneType(JavacTreeMaker maker, JCExpression in, JCTree source, Context context) {
+		JCExpression out = cloneType0(maker, in);
+		if (out != null) recursiveSetGeneratedBy(out, source, context);
+		return out;
+	}
+	
+	private static JCExpression cloneType0(JavacTreeMaker maker, JCTree in) {
+		if (in == null) return null;
+		
+		if (in instanceof JCPrimitiveTypeTree) return (JCExpression) in;
+		
+		if (in instanceof JCIdent) {
+			return maker.Ident(((JCIdent) in).name);
+		}
+		
+		if (in instanceof JCFieldAccess) {
+			JCFieldAccess fa = (JCFieldAccess) in;
+			return maker.Select(cloneType0(maker, fa.selected), fa.name);
+		}
+		
+		if (in instanceof JCArrayTypeTree) {
+			JCArrayTypeTree att = (JCArrayTypeTree) in;
+			return maker.TypeArray(cloneType0(maker, att.elemtype));
+		}
+		
+		if (in instanceof JCTypeApply) {
+			JCTypeApply ta = (JCTypeApply) in;
+			ListBuffer<JCExpression> lb = new ListBuffer<JCExpression>();
+			for (JCExpression typeArg : ta.arguments) {
+				lb.append(cloneType0(maker, typeArg));
+			}
+			return maker.TypeApply(cloneType0(maker, ta.clazz), lb.toList());
+		}
+		
+		if (in instanceof JCWildcard) {
+			JCWildcard w = (JCWildcard) in;
+			JCExpression newInner = cloneType0(maker, w.inner);
+			TypeBoundKind newKind;
+			switch (w.getKind()) {
+			case SUPER_WILDCARD:
+				newKind = maker.TypeBoundKind(BoundKind.SUPER);
+				break;
+			case EXTENDS_WILDCARD:
+				newKind = maker.TypeBoundKind(BoundKind.EXTENDS);
+				break;
+			default:
+			case UNBOUNDED_WILDCARD:
+				newKind = maker.TypeBoundKind(BoundKind.UNBOUND);
+				break;
+			}
+			return maker.Wildcard(newKind, newInner);
+		}
+		
+		// This is somewhat unsafe, but it's better than outright throwing an exception here. Returning null will just cause an exception down the pipeline.
+		return (JCExpression) in;
+	}
+	
+	private static final Pattern SECTION_FINDER = Pattern.compile("^\\s*\\**\\s*[-*][-*]+\\s*([GS]ETTER|WITHER)\\s*[-*][-*]+\\s*\\**\\s*$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+	
+	private static String stripLinesWithTagFromJavadoc(String javadoc, String regexpFragment) {
+		Pattern p = Pattern.compile("^\\s*\\**\\s*" + regexpFragment + "\\s*\\**\\s*$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+		Matcher m = p.matcher(javadoc);
+		return m.replaceAll("");
+	}
+	
+	private static String[] splitJavadocOnSectionIfPresent(String javadoc, String sectionName) {
+		Matcher m = SECTION_FINDER.matcher(javadoc);
+		int getterSectionHeaderStart = -1;
+		int getterSectionStart = -1;
+		int getterSectionEnd = -1;
+		while (m.find()) {
+			if (m.group(1).equalsIgnoreCase(sectionName)) {
+				getterSectionStart = m.end() + 1;
+				getterSectionHeaderStart = m.start();
+			} else if (getterSectionStart != -1) {
+				getterSectionEnd = m.start();
+			}
+		}
+		
+		if (getterSectionStart != -1) {
+			if (getterSectionEnd != -1) {
+				return new String[] {javadoc.substring(getterSectionStart, getterSectionEnd), javadoc.substring(0, getterSectionHeaderStart) + javadoc.substring(getterSectionEnd)};
+			} else {
+				return new String[] {javadoc.substring(getterSectionStart), javadoc.substring(0, getterSectionHeaderStart)};
+			}
+		}
+		
+		return null;
+	}
+	
+	public static enum CopyJavadoc {
+		VERBATIM, GETTER {
+			@Override public String[] split(String javadoc) {
+				// step 1: Check if there is a 'GETTER' section. If yes, that becomes the new method's javadoc and we strip that from the original.
+				String[] out = splitJavadocOnSectionIfPresent(javadoc, "GETTER");
+				if (out != null) return out;
+				// failing that, create a copy, but strip @return from the original and @param from the copy.
+				String copy = javadoc;
+				javadoc = stripLinesWithTagFromJavadoc(javadoc, "@returns?\\s+.*");
+				copy = stripLinesWithTagFromJavadoc(copy, "@param(?:eter)?\\s+.*");
+				return new String[] {copy, javadoc};
+			}
+		},
+		SETTER {
+			@Override public String[] split(String javadoc) {
+				return splitForSetters(javadoc, "SETTER");
+			}
+		},
+		WITHER {
+			@Override public String[] split(String javadoc) {
+				return splitForSetters(javadoc, "WITHER");
+			}
+		};
+		
+		private static String[] splitForSetters(String javadoc, String sectionName) {
+			// step 1: Check if there is a 'SETTER' section. If yes, that becomes the new one and we strip that from the original.
+			String[] out = splitJavadocOnSectionIfPresent(javadoc, sectionName);
+			if (out != null) return out;
+			// failing that, create a copy, but strip @param from the original and @return from the copy.
+			String copy = javadoc;
+			javadoc = stripLinesWithTagFromJavadoc(javadoc, "@param(?:eter)?\\s+.*");
+			copy = stripLinesWithTagFromJavadoc(copy, "@returns?\\s+.*");
+			return new String[] {copy, javadoc};
+		}
+		
+		/** Splits the javadoc into the section to be copied (ret[0]) and the section to replace the original with (ret[1]) */
+		public String[] split(String javadoc) {
+			return new String[] {javadoc, javadoc};
+		}
+	}
+	
+	/**
+	 * Copies javadoc on one node to the other.
+	 * 
+	 * in 'GETTER' copyMode, first a 'GETTER' segment is searched for. If it exists, that will become the javadoc for the 'to' node, and this section is
+	 * stripped out of the 'from' node. If no 'GETTER' segment is found, then the entire javadoc is taken minus any {@code @param} lines. any {@code @return} lines
+	 * are stripped from 'from'.
+	 * 
+	 * in 'SETTER' mode, stripping works similarly to 'GETTER' mode, except {@code param} are copied and stripped from the original and {@code @return} are skipped.
+	 */
+	public static void copyJavadoc(JavacNode from, JCTree to, CopyJavadoc copyMode) {
+		if (copyMode == null) copyMode = CopyJavadoc.VERBATIM;
+		try {
+			JCCompilationUnit cu = ((JCCompilationUnit) from.top().get());
+			Object dc = Javac.getDocComments(cu);
+			if (dc instanceof Map) {
+				copyJavadoc_jdk6_7(from, to, copyMode, dc);
+			} else if (Javac.instanceOfDocCommentTable(dc)) {
+				CopyJavadoc_8.copyJavadoc(from, to, copyMode, dc);
+			}
+		} catch (Exception ignore) {}
+	}
+	
+	private static class CopyJavadoc_8 {
+		static void copyJavadoc(JavacNode from, JCTree to, CopyJavadoc copyMode, Object dc) {
+			DocCommentTable dct = (DocCommentTable) dc;
+			Comment javadoc = dct.getComment(from.get());
+			
+			if (javadoc != null) {
+				String[] filtered = copyMode.split(javadoc.getText());
+				dct.putComment(to, createJavadocComment(filtered[0], from));
+				dct.putComment(from.get(), createJavadocComment(filtered[1], from));
+			}
+		}
+		
+		private static Comment createJavadocComment(final String text, final JavacNode field) {
+			return new Comment() {
+				@Override public String getText() {
+					return text;
+				}
+				
+				@Override public int getSourcePos(int index) {
+					return -1;
+				}
+				
+				@Override public CommentStyle getStyle() {
+					return CommentStyle.JAVADOC;
+				}
+				
+				@Override public boolean isDeprecated() {
+					return text.contains("@deprecated") && field.getKind() == Kind.FIELD && isFieldDeprecated(field);
+				}
+			};
+		}
+	}
+
+	@SuppressWarnings({"unchecked", "all"})
+	private static void copyJavadoc_jdk6_7(JavacNode from, JCTree to, CopyJavadoc copyMode, Object dc) {
+		Map<JCTree, String> docComments = (Map<JCTree, String>) dc;
+		String javadoc = docComments.get(from.get());
+		
+		if (javadoc != null) {
+			String[] filtered = copyMode.split(javadoc);
+			docComments.put(to, filtered[0]);
+			docComments.put(from.get(), filtered[1]);
+		}
 	}
 }

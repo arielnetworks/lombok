@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2012 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 package lombok.eclipse.handlers;
 
 import static lombok.eclipse.Eclipse.*;
+import static lombok.core.TransformationsUtil.*;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -40,14 +41,14 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Lombok;
-import lombok.core.AnnotationValues;
-import lombok.core.TransformationsUtil;
 import lombok.core.AST.Kind;
+import lombok.core.AnnotationValues;
 import lombok.core.AnnotationValues.AnnotationValue;
+import lombok.core.TransformationsUtil;
+import lombok.core.TypeResolver;
 import lombok.eclipse.EclipseAST;
 import lombok.eclipse.EclipseNode;
 import lombok.experimental.Accessors;
-import lombok.core.TypeResolver;
 
 import org.eclipse.core.runtime.ILog;
 import org.eclipse.core.runtime.IStatus;
@@ -61,8 +62,8 @@ import org.eclipse.jdt.internal.compiler.ast.Annotation;
 import org.eclipse.jdt.internal.compiler.ast.ArrayInitializer;
 import org.eclipse.jdt.internal.compiler.ast.ArrayQualifiedTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.ArrayTypeReference;
+import org.eclipse.jdt.internal.compiler.ast.Block;
 import org.eclipse.jdt.internal.compiler.ast.CastExpression;
-import org.eclipse.jdt.internal.compiler.ast.Clinit;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.EqualExpression;
@@ -143,7 +144,7 @@ public class EclipseHandlerUtil {
 		} catch (NoClassDefFoundError e) {  //standalone ecj does not jave Platform, ILog, IStatus, and friends.
 			new TerminalLogger().error(message, bundleName, error);
 		}
-		if (cud != null) EclipseAST.addProblemToCompilationResult(cud, false, message + " - See error log.", 0, 0);
+		if (cud != null) EclipseAST.addProblemToCompilationResult(cud.getFileName(), cud.compilationResult, false, message + " - See error log.", 0, 0);
 	}
 	
 	/**
@@ -250,7 +251,17 @@ public class EclipseHandlerUtil {
 		QualifiedTypeReference qtr = new QualifiedTypeReference(new char[][] {
 				{'j', 'a', 'v', 'a'}, {'l', 'a', 'n', 'g'}, {'D', 'e', 'p', 'r', 'e', 'c', 'a', 't', 'e', 'd'}}, poss(source, 3));
 		setGeneratedBy(qtr, source);
-		return new MarkerAnnotation(qtr, source.sourceStart);
+		MarkerAnnotation ma = new MarkerAnnotation(qtr, source.sourceStart);
+		// No matter what value you input for sourceEnd, the AST->DOM converter of eclipse will reparse to find the end, and will fail as
+		// it can't find code that isn't really there. This results in the end position being set to 2 or 0 or some weird magic value, and thus,
+		// length, as calculated by end-start, is all screwed up, resulting in IllegalArgumentException during a setSourceRange call MUCH later in the process.
+		// We solve it by going with a voodoo magic source start value such that the calculated length so happens to exactly be 0. 0 lengths are accepted
+		// by eclipse. For some reason.
+		// TL;DR: Don't change 1. 1 is sacred. Trust the 1.
+		// issue: #408.
+		ma.sourceStart = 1;
+		setGeneratedBy(ma, source);
+		return ma;
 	}
 	
 	public static boolean isFieldDeprecated(EclipseNode fieldNode) {
@@ -281,9 +292,32 @@ public class EclipseHandlerUtil {
 		if (!lastPartA.equals(lastPartB)) return false;
 		String typeName = toQualifiedName(typeRef.getTypeName());
 		
-		TypeResolver resolver = new TypeResolver(node.getPackageDeclaration(), node.getImportStatements());
+		TypeResolver resolver = new TypeResolver(node.getImportList());
 		return resolver.typeMatches(node, type.getName(), typeName);
 		
+	}
+	
+	public static void sanityCheckForMethodGeneratingAnnotationsOnBuilderClass(EclipseNode typeNode, EclipseNode errorNode) {
+		List<String> disallowed = null;
+		for (EclipseNode child : typeNode.down()) {
+			for (Class<? extends java.lang.annotation.Annotation> annType : INVALID_ON_BUILDERS) {
+				if (annotationTypeMatches(annType, child)) {
+					if (disallowed == null) disallowed = new ArrayList<String>();
+					disallowed.add(annType.getSimpleName());
+				}
+			}
+		}
+		
+		int size = disallowed == null ? 0 : disallowed.size();
+		if (size == 0) return;
+		if (size == 1) {
+			errorNode.addError("@" + disallowed.get(0) + " is not allowed on builder classes.");
+			return;
+		}
+		StringBuilder out = new StringBuilder();
+		for (String a : disallowed) out.append("@").append(a).append(", ");
+		out.setLength(out.length() - 2);
+		errorNode.addError(out.append(" are not allowed on builder classes.").toString());
 	}
 	
 	public static Annotation copyAnnotation(Annotation annotation, ASTNode source) {
@@ -347,6 +381,20 @@ public class EclipseHandlerUtil {
 			out[idx++] = o;
 		}
 		return out;
+	}
+	
+	public static TypeReference namePlusTypeParamsToTypeReference(char[] typeName, TypeParameter[] params, long p) {
+		if (params != null && params.length > 0) {
+			TypeReference[] refs = new TypeReference[params.length];
+			int idx = 0;
+			for (TypeParameter param : params) {
+				TypeReference typeRef = new SingleTypeReference(param.name, p);
+				refs[idx++] = typeRef;
+			}
+			return new ParameterizedSingleTypeReference(typeName, refs, 0, p);
+		}
+		
+		return new SingleTypeReference(typeName, p);
 	}
 	
 	/**
@@ -464,7 +512,25 @@ public class EclipseHandlerUtil {
 			}
 		}
 		if (allNull) return null;
-		return result.toArray(EMPTY_ANNOTATION_ARRAY);
+		return result.toArray(new Annotation[0]);
+	}
+	
+	public static boolean hasAnnotation(Class<? extends java.lang.annotation.Annotation> type, EclipseNode node) {
+		if (node == null) return false;
+		if (type == null) return false;
+		switch (node.getKind()) {
+		case ARGUMENT:
+		case FIELD:
+		case LOCAL:
+		case TYPE:
+		case METHOD:
+			for (EclipseNode child : node.down()) {
+				if (annotationTypeMatches(type, child)) return true;
+			}
+			// intentional fallthrough
+		default:
+			return false;
+		}
 	}
 	
 	/**
@@ -475,6 +541,31 @@ public class EclipseHandlerUtil {
 	public static boolean annotationTypeMatches(Class<? extends java.lang.annotation.Annotation> type, EclipseNode node) {
 		if (node.getKind() != Kind.ANNOTATION) return false;
 		return typeMatches(type, node, ((Annotation)node.get()).type);
+	}
+	
+	public static TypeReference cloneSelfType(EclipseNode context, ASTNode source) {
+		int pS = source.sourceStart, pE = source.sourceEnd;
+		long p = (long)pS << 32 | pE;
+		EclipseNode type = context;
+		TypeReference result = null;
+		while (type != null && type.getKind() != Kind.TYPE) type = type.up();
+		if (type != null && type.get() instanceof TypeDeclaration) {
+			TypeDeclaration typeDecl = (TypeDeclaration) type.get();
+			if (typeDecl.typeParameters != null && typeDecl.typeParameters.length > 0) {
+				TypeReference[] refs = new TypeReference[typeDecl.typeParameters.length];
+				int idx = 0;
+				for (TypeParameter param : typeDecl.typeParameters) {
+					TypeReference typeRef = new SingleTypeReference(param.name, (long)param.sourceStart << 32 | param.sourceEnd);
+					setGeneratedBy(typeRef, source);
+					refs[idx++] = typeRef;
+				}
+				result = new ParameterizedSingleTypeReference(typeDecl.name, refs, 0, p);
+			} else {
+				result = new SingleTypeReference(((TypeDeclaration)type.get()).name, p);
+			}
+		}
+		if (result != null) setGeneratedBy(result, source);
+		return result;
 	}
 	
 	public static TypeReference makeType(TypeBinding binding, ASTNode pos, boolean allowCompound) {
@@ -774,9 +865,25 @@ public class EclipseHandlerUtil {
 		}
 	}
 	
+	private static final Map<FieldDeclaration, Object> generatedLazyGettersWithPrimitiveBoolean = new WeakHashMap<FieldDeclaration, Object>();
+	private static final Object MARKER = new Object();
+	
+	static void registerCreatedLazyGetter(FieldDeclaration field, char[] methodName, TypeReference returnType) {
+		if (isBoolean(returnType)) {
+			generatedLazyGettersWithPrimitiveBoolean.put(field, MARKER);
+		}
+	}
+	
+	public static boolean isBoolean(TypeReference typeReference) {
+		return nameEquals(typeReference.getTypeName(), "boolean") && typeReference.dimensions() == 0;
+	}
+	
 	private static GetterMethod findGetter(EclipseNode field) {
-		TypeReference fieldType = ((FieldDeclaration)field.get()).type;
-		boolean isBoolean = nameEquals(fieldType.getTypeName(), "boolean") && fieldType.dimensions() == 0;
+		FieldDeclaration fieldDeclaration = (FieldDeclaration) field.get();
+		boolean forceBool = generatedLazyGettersWithPrimitiveBoolean.containsKey(fieldDeclaration);
+		TypeReference fieldType = fieldDeclaration.type;
+		boolean isBoolean = forceBool || isBoolean(fieldType);
+		
 		EclipseNode typeNode = field.up();
 		for (String potentialGetterName : toAllGetterNames(field, isBoolean)) {
 			for (EclipseNode potentialGetter : typeNode.down()) {
@@ -829,7 +936,7 @@ public class EclipseHandlerUtil {
 		return null;
 	}
 	
-	enum FieldAccess {
+	public enum FieldAccess {
 		GETTER, PREFER_FIELD, ALWAYS_FIELD;
 	}
 	
@@ -936,10 +1043,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllGetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static List<String> toAllGetterNames(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllGetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllGetterNames(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -948,10 +1052,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toGetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toGetterName(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toGetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toGetterName(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -959,10 +1060,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllSetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllSetterNames(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllSetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllSetterNames(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -971,10 +1069,24 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toSetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toSetterName(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toSetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toSetterName(getAccessorsForField(field), field.getName(), isBoolean);
+	}
+	
+	/**
+	 * Translates the given field into all possible wither names.
+	 * Convenient wrapper around {@link TransformationsUtil#toAllWitherNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static java.util.List<String> toAllWitherNames(EclipseNode field, boolean isBoolean) {
+		return TransformationsUtil.toAllWitherNames(getAccessorsForField(field), field.getName(), isBoolean);
+	}
+	
+	/**
+	 * @return the likely wither name for the stated field. (e.g. private boolean foo; to withFoo).
+	 * 
+	 * Convenient wrapper around {@link TransformationsUtil#toWitherName(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static String toWitherName(EclipseNode field, boolean isBoolean) {
+		return TransformationsUtil.toWitherName(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -994,6 +1106,10 @@ public class EclipseHandlerUtil {
 	 *    If the field is static, or starts with a '$', or is actually an enum constant, 'false' is returned, indicating you should skip it.
 	 */
 	public static boolean filterField(FieldDeclaration declaration) {
+		return filterField(declaration, true);
+	}
+	
+	public static boolean filterField(FieldDeclaration declaration, boolean skipStatic) {
 		// Skip the fake fields that represent enum constants.
 		if (declaration.initialization instanceof AllocationExpression &&
 				((AllocationExpression)declaration.initialization).enumConstant != null) return false;
@@ -1004,9 +1120,40 @@ public class EclipseHandlerUtil {
 		if (declaration.name.length > 0 && declaration.name[0] == '$') return false;
 		
 		// Skip static fields.
-		if ((declaration.modifiers & ClassFileConstants.AccStatic) != 0) return false;
+		if (skipStatic && (declaration.modifiers & ClassFileConstants.AccStatic) != 0) return false;
 		
 		return true;
+	}
+	
+	public static char[] removePrefixFromField(EclipseNode field) {
+		String[] prefixes = null;
+		for (EclipseNode node : field.down()) {
+			if (annotationTypeMatches(Accessors.class, node)) {
+				prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+				break;
+			}
+		}
+		
+		if (prefixes == null) {
+			EclipseNode current = field.up();
+			outer:
+			while (current != null) {
+				for (EclipseNode node : current.down()) {
+					if (annotationTypeMatches(Accessors.class, node)) {
+						prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+						break outer;
+					}
+				}
+				current = current.up();
+			}
+		}
+		
+		if (prefixes != null && prefixes.length > 0) {
+			CharSequence newName = TransformationsUtil.removePrefix(field.getName(), prefixes);
+			if (newName != null) return newName.toString().toCharArray();
+		}
+		
+		return ((FieldDeclaration) field.get()).name;
 	}
 	
 	public static AnnotationValues<Accessors> getAccessorsForField(EclipseNode field) {
@@ -1135,15 +1282,15 @@ public class EclipseHandlerUtil {
 	 * Inserts a field into an existing type. The type must represent a {@code TypeDeclaration}.
 	 * The field carries the &#64;{@link SuppressWarnings}("all") annotation.
 	 */
-	public static void injectFieldSuppressWarnings(EclipseNode type, FieldDeclaration field) {
+	public static EclipseNode injectFieldSuppressWarnings(EclipseNode type, FieldDeclaration field) {
 		field.annotations = createSuppressWarningsAll(field, field.annotations);
-		injectField(type, field);
+		return injectField(type, field);
 	}
 	
 	/**
 	 * Inserts a field into an existing type. The type must represent a {@code TypeDeclaration}.
 	 */
-	public static void injectField(EclipseNode type, FieldDeclaration field) {
+	public static EclipseNode injectField(EclipseNode type, FieldDeclaration field) {
 		TypeDeclaration parent = (TypeDeclaration) type.get();
 		
 		if (parent.fields == null) {
@@ -1164,13 +1311,13 @@ public class EclipseHandlerUtil {
 			parent.fields = newArray;
 		}
 		
-		if ((field.modifiers & Modifier.STATIC) != 0) {
+		if (isEnumConstant(field) || (field.modifiers & Modifier.STATIC) != 0) {
 			if (!hasClinit(parent)) {
 				parent.addClinit();
 			}
 		}
 		
-		type.add(field, Kind.FIELD);
+		return type.add(field, Kind.FIELD);
 	}
 	
 	private static boolean isEnumConstant(final FieldDeclaration field) {
@@ -1180,7 +1327,7 @@ public class EclipseHandlerUtil {
 	/**
 	 * Inserts a method into an existing type. The type must represent a {@code TypeDeclaration}.
 	 */
-	public static void injectMethod(EclipseNode type, AbstractMethodDeclaration method) {
+	public static EclipseNode injectMethod(EclipseNode type, AbstractMethodDeclaration method) {
 		method.annotations = createSuppressWarningsAll(method, method.annotations);
 		TypeDeclaration parent = (TypeDeclaration) type.get();
 		
@@ -1205,28 +1352,37 @@ public class EclipseHandlerUtil {
 					}
 				}
 			}
-			int insertionPoint;
-			for (insertionPoint = 0; insertionPoint < parent.methods.length; insertionPoint++) {
-				AbstractMethodDeclaration current = parent.methods[insertionPoint];
-				if (current instanceof Clinit) continue;
-				if (method instanceof ConstructorDeclaration) {
-					if (current instanceof ConstructorDeclaration) continue;
-					break;
-				}
-				if (isGenerated(current)) continue;
-				break;
-			}
+			//We insert the method in the last position of the methods registered to the type
+			//When changing this behavior, this may trigger issue #155 and #377
 			AbstractMethodDeclaration[] newArray = new AbstractMethodDeclaration[parent.methods.length + 1];
-			System.arraycopy(parent.methods, 0, newArray, 0, insertionPoint);
-			if (insertionPoint <= parent.methods.length) {
-				System.arraycopy(parent.methods, insertionPoint, newArray, insertionPoint + 1, parent.methods.length - insertionPoint);
-			}
-			
-			newArray[insertionPoint] = method;
+			System.arraycopy(parent.methods, 0, newArray, 0, parent.methods.length);
+			newArray[parent.methods.length] = method;
 			parent.methods = newArray;
 		}
 		
-		type.add(method, Kind.METHOD);
+		return type.add(method, Kind.METHOD);
+	}
+	
+	/**
+	 * Adds an inner type (class, interface, enum) to the given type. Cannot inject top-level types.
+	 * 
+	 * @param typeNode parent type to inject new type into
+	 * @param type New type (class, interface, etc) to inject.
+	 */
+	public static EclipseNode injectType(final EclipseNode typeNode, final TypeDeclaration type) {
+		type.annotations = createSuppressWarningsAll(type, type.annotations);
+		TypeDeclaration parent = (TypeDeclaration) typeNode.get();
+
+		if (parent.memberTypes == null) {
+			parent.memberTypes = new TypeDeclaration[] { type };
+		} else {
+			TypeDeclaration[] newArray = new TypeDeclaration[parent.memberTypes.length + 1];
+			System.arraycopy(parent.memberTypes, 0, newArray, 0, parent.memberTypes.length);
+			newArray[parent.memberTypes.length] = type;
+			parent.memberTypes = newArray;
+		}
+		
+		return typeNode.add(type, Kind.TYPE);
 	}
 	
 	private static final char[] ALL = "all".toCharArray();
@@ -1275,7 +1431,11 @@ public class EclipseHandlerUtil {
 		EqualExpression equalExpression = new EqualExpression(varName, nullLiteral, OperatorIds.EQUAL_EQUAL);
 		equalExpression.sourceStart = pS; equalExpression.statementEnd = equalExpression.sourceEnd = pE;
 		setGeneratedBy(equalExpression, source);
-		IfStatement ifStatement = new IfStatement(equalExpression, throwStatement, 0, 0);
+		Block throwBlock = new Block(0);
+		throwBlock.statements = new Statement[] {throwStatement};
+		throwBlock.sourceStart = pS; throwBlock.sourceEnd = pE;
+		setGeneratedBy(throwBlock, source);
+		IfStatement ifStatement = new IfStatement(equalExpression, throwBlock, 0, 0);
 		setGeneratedBy(ifStatement, source);
 		return ifStatement;
 	}
@@ -1421,52 +1581,114 @@ public class EclipseHandlerUtil {
 		Method intLiteralFactoryMethod_ = null;
 		try { 
 			intLiteralConstructor_ = IntLiteral.class.getConstructor(parameterTypes);
-		} catch (Exception ignore) {
+		} catch (Throwable ignore) {
 			// probably eclipse 3.7++
 		}
 		try { 
 			intLiteralFactoryMethod_ = IntLiteral.class.getMethod("buildIntLiteral", parameterTypes);
-		} catch (Exception ignore) {
+		} catch (Throwable ignore) {
 			// probably eclipse versions before 3.7
 		}
 		intLiteralConstructor = intLiteralConstructor_;
 		intLiteralFactoryMethod = intLiteralFactoryMethod_;
 	}
 	
-	private static final Annotation[] EMPTY_ANNOTATION_ARRAY = new Annotation[0];
-	static Annotation[] getAndRemoveAnnotationParameter(Annotation annotation, String annotationName) {
+	private static boolean isAllValidOnXCharacters(char[] in) {
+		if (in == null || in.length == 0) return false;
+		for (char c : in) if (c != '_' && c != 'X' && c != 'x' && c != '$') return false;
+		return true;
+	}
+	
+	static List<Annotation> unboxAndRemoveAnnotationParameter(Annotation annotation, String annotationName, String errorName, EclipseNode errorNode) {
+		if ("value".equals(annotationName)) {
+			// We can't unbox this, because SingleMemberAnnotation REQUIRES a value, and this method
+			// is supposed to remove the value. That means we need to replace the SMA with either
+			// MarkerAnnotation or NormalAnnotation and that is beyond the scope of this method as we
+			// don't need that at the time of writing this method; we only unbox onMethod, onParameter
+			// and onConstructor. Let's exit early and very obviously:
+			throw new UnsupportedOperationException("Lombok cannot unbox 'value' from SingleMemberAnnotation at this time.");
+		}
+		if (!NormalAnnotation.class.equals(annotation.getClass())) {
+			// Prevent MarkerAnnotation, SingleMemberAnnotation, and
+			// CompletionOnAnnotationMemberValuePair from triggering this handler.
+			return Collections.emptyList();
+		}
 		
-		List<Annotation> result = new ArrayList<Annotation>();
-		if (annotation instanceof NormalAnnotation) {
-			NormalAnnotation normalAnnotation = (NormalAnnotation)annotation;
-			MemberValuePair[] memberValuePairs = normalAnnotation.memberValuePairs;
-			List<MemberValuePair> pairs = new ArrayList<MemberValuePair>();
-			if (memberValuePairs != null) for (MemberValuePair memberValuePair : memberValuePairs) {
-				if (annotationName.equals(new String(memberValuePair.name))) {
-					Expression value = memberValuePair.value;
-					if (value instanceof ArrayInitializer) {
-						ArrayInitializer array = (ArrayInitializer) value;
-						for(Expression expression : array.expressions) {
-							if (expression instanceof Annotation) {
-								result.add((Annotation)expression);
-							}
-						}
-					}
-					else if (value instanceof Annotation) {
-						result.add((Annotation)value);
-					}
-					continue;
-				}
-				pairs.add(memberValuePair);
+		NormalAnnotation normalAnnotation = (NormalAnnotation) annotation;
+		MemberValuePair[] pairs = normalAnnotation.memberValuePairs;
+		
+		if (pairs == null) return Collections.emptyList();
+		
+		char[] nameAsCharArray = annotationName.toCharArray();
+		
+		for (int i = 0; i < pairs.length; i++) {
+			if (pairs[i].name == null || !Arrays.equals(nameAsCharArray, pairs[i].name)) continue;
+			Expression value = pairs[i].value;
+			MemberValuePair[] newPairs = new MemberValuePair[pairs.length - 1];
+			if (i > 0) System.arraycopy(pairs, 0, newPairs, 0, i);
+			if (i < pairs.length - 1) System.arraycopy(pairs, i + 1, newPairs, i, pairs.length - i - 1);
+			normalAnnotation.memberValuePairs = newPairs;
+			// We have now removed the annotation parameter and stored '@__({... annotations ...})',
+			// which we must now unbox.
+			if (!(value instanceof Annotation)) {
+				errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+				return Collections.emptyList();
 			}
 			
-			if (!result.isEmpty()) {
-				normalAnnotation.memberValuePairs = pairs.isEmpty() ? null : pairs.toArray(new MemberValuePair[0]);
-				return result.toArray(EMPTY_ANNOTATION_ARRAY);
+			Annotation atDummyIdentifier = (Annotation) value;
+			if (!(atDummyIdentifier.type instanceof SingleTypeReference) ||
+					!isAllValidOnXCharacters(((SingleTypeReference) atDummyIdentifier.type).token)) {
+				errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+				return Collections.emptyList();
+			}
+			
+			if (atDummyIdentifier instanceof MarkerAnnotation) {
+				// It's @Getter(onMethod=@__). This is weird, but fine.
+				return Collections.emptyList();
+			}
+			
+			Expression content = null;
+			
+			if (atDummyIdentifier instanceof NormalAnnotation) {
+				MemberValuePair[] mvps = ((NormalAnnotation) atDummyIdentifier).memberValuePairs;
+				if (mvps == null || mvps.length == 0) {
+					// It's @Getter(onMethod=@__()). This is weird, but fine.
+					return Collections.emptyList();
+				}
+				if (mvps.length == 1 && Arrays.equals("value".toCharArray(), mvps[0].name)) {
+					content = mvps[0].value;
+				}
+			}
+			
+			if (atDummyIdentifier instanceof SingleMemberAnnotation) {
+				content = ((SingleMemberAnnotation) atDummyIdentifier).memberValue;
+			}
+			
+			if (content == null) {
+				errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+				return Collections.emptyList();
+			}
+			
+			if (content instanceof Annotation) {
+				return Collections.singletonList((Annotation) content);
+			} else if (content instanceof ArrayInitializer) {
+				Expression[] expressions = ((ArrayInitializer) content).expressions;
+				List<Annotation> result = new ArrayList<Annotation>();
+				if (expressions != null) for (Expression ex : expressions) {
+					if (ex instanceof Annotation) result.add((Annotation) ex);
+					else {
+						errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+						return Collections.emptyList();
+					}
+				}
+				return result;
+			} else {
+				errorNode.addError("The correct format is " + errorName + "@__({@SomeAnnotation, @SomeOtherAnnotation}))");
+				return Collections.emptyList();
 			}
 		}
 		
-		return EMPTY_ANNOTATION_ARRAY;
+		return Collections.emptyList();
 	}
 	
 	static NameReference createNameReference(String name, Annotation source) {

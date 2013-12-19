@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2011 The Project Lombok Authors.
+ * Copyright (C) 2009-2012 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,14 @@
 package lombok.eclipse;
 
 import lombok.core.AnnotationValues;
+import lombok.core.SpiLoadUtil;
 
 /**
  * Implement this interface if you want to be triggered for a specific annotation.
  * 
  * You MUST replace 'T' with a specific annotation type, such as:
  * 
- * {@code public class HandleGetter implements EclipseAnnotationHandler<Getter>}
+ * {@code public class HandleGetter extends EclipseAnnotationHandler<Getter>}
  * 
  * Because this generics parameter is inspected to figure out which class you're interested in.
  * 
@@ -61,11 +62,11 @@ public abstract class EclipseAnnotationHandler<T extends java.lang.annotation.An
 	}
 	
 	/**
-	 * Return true if this handler should not be run in the diet parse phase.
-	 * 'diet parse' is where method bodies aren't filled in yet. If you have a method-level annotation that modifies the contents of that method,
-	 * return {@code true} here. Otherwise, return {@code false} here.
+	 * This handler is a handler for the given annotation; you don't normally need to override this class
+	 * as the annotation type is extracted from your {@code extends EclipseAnnotationHandler<AnnotationTypeHere>}
+	 * signature.
 	 */
-	public boolean deferUntilPostDiet() {
-		return false;
+	@SuppressWarnings("unchecked") public Class<T> getAnnotationHandledByThisHandler() {
+		return (Class<T>) SpiLoadUtil.findAnnotationClass(getClass(), EclipseAnnotationHandler.class);
 	}
 }

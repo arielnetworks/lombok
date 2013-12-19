@@ -22,13 +22,25 @@
 package lombok.core;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
+import lombok.Value;
 import lombok.experimental.Accessors;
+import lombok.experimental.FieldDefaults;
+import lombok.experimental.Wither;
 
 /**
  * Container for static utility methods useful for some of the standard lombok transformations, regardless of
@@ -38,6 +50,13 @@ public class TransformationsUtil {
 	private TransformationsUtil() {
 		//Prevent instantiation
 	}
+	
+	@SuppressWarnings({"all", "unchecked", "deprecation"})
+	public static final List<Class<? extends java.lang.annotation.Annotation>> INVALID_ON_BUILDERS = Collections.unmodifiableList(
+			Arrays.<Class<? extends java.lang.annotation.Annotation>>asList(
+			Getter.class, Setter.class, Wither.class, ToString.class, EqualsAndHashCode.class, 
+			RequiredArgsConstructor.class, AllArgsConstructor.class, NoArgsConstructor.class, 
+			Data.class, Value.class, lombok.experimental.Value.class, FieldDefaults.class));
 	
 	/**
 	 * Given the name of a field, return the 'base name' of that field. For example, {@code fFoobar} becomes {@code foobar} if {@code f} is in the prefix list.
@@ -51,8 +70,10 @@ public class TransformationsUtil {
 	 * @param prefixes A list of prefixes, usually provided by the {@code Accessors} settings annotation, listing field prefixes.
 	 * @return The base name of the field.
 	 */
-	private static CharSequence removePrefix(CharSequence fieldName, String[] prefixes) {
+	public static CharSequence removePrefix(CharSequence fieldName, String[] prefixes) {
 		if (prefixes == null || prefixes.length == 0) return fieldName;
+		
+		fieldName = fieldName.toString();
 		
 		outer:
 		for (String prefix : prefixes) {
@@ -104,20 +125,7 @@ public class TransformationsUtil {
 	 * @return The getter name for this field, or {@code null} if this field does not fit expected patterns and therefore cannot be turned into a getter name.
 	 */
 	public static String toGetterName(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
-		if (fieldName.length() == 0) return null;
-		
-		Accessors ac = accessors.getInstance();
-		fieldName = removePrefix(fieldName, ac.prefix());
-		if (fieldName == null) return null;
-		
-		if (ac.fluent()) return fieldName.toString();
-		
-		if (isBoolean && fieldName.toString().startsWith("is") && fieldName.length() > 2 && !Character.isLowerCase(fieldName.charAt(2))) {
-			// The field is for example named 'isRunning'.
-			return fieldName.toString();
-		}
-		
-		return buildName(isBoolean ? "is" : "get", fieldName.toString());
+		return toAccessorName(accessors, fieldName, isBoolean, "is", "get", true);
 	}
 	
 	/**
@@ -141,20 +149,51 @@ public class TransformationsUtil {
 	 * @return The setter name for this field, or {@code null} if this field does not fit expected patterns and therefore cannot be turned into a getter name.
 	 */
 	public static String toSetterName(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
+		return toAccessorName(accessors, fieldName, isBoolean, "set", "set", true);
+	}
+	
+	/**
+	 * Generates a wither name from a given field name.
+	 * 
+	 * Strategy:
+	 * <ul>
+	 * <li>Reduce the field's name to its base name by stripping off any prefix (from {@code Accessors}). If the field name does not fit
+	 * the prefix list, this method immediately returns {@code null}.</li>
+	 * <li>Only if {@code isBoolean} is true: Check if the field starts with {@code is} followed by a non-lowercase character.
+	 * If so, replace {@code is} with {@code with} and return that.</li> 
+	 * <li>Check if the first character of the field is lowercase. If so, check if the second character
+	 * exists and is title or upper case. If so, uppercase the first character. If not, titlecase the first character.</li>
+	 * <li>Return {@code "with"} plus the possibly title/uppercased first character, and the rest of the field name.</li>
+	 * </ul>
+	 * 
+	 * @param accessors Accessors configuration.
+	 * @param fieldName the name of the field.
+	 * @param isBoolean if the field is of type 'boolean'. For fields of type {@code java.lang.Boolean}, you should provide {@code false}.
+	 * @return The wither name for this field, or {@code null} if this field does not fit expected patterns and therefore cannot be turned into a getter name.
+	 */
+	public static String toWitherName(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
+		return toAccessorName(accessors, fieldName, isBoolean, "with", "with", false);
+	}
+	
+	private static String toAccessorName(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean,
+			String booleanPrefix, String normalPrefix, boolean adhereToFluent) {
+		
+		fieldName = fieldName.toString();
 		if (fieldName.length() == 0) return null;
-		Accessors ac = accessors.getInstance();
-		fieldName = removePrefix(fieldName, ac.prefix());
+		
+		Accessors ac = accessors == null ? null : accessors.getInstance();
+		fieldName = removePrefix(fieldName, ac == null ? new String[0] : ac.prefix());
 		if (fieldName == null) return null;
 		
 		String fName = fieldName.toString();
-		if (ac.fluent()) return fName;
+		if (adhereToFluent && ac != null && ac.fluent()) return fName;
 		
-		if (isBoolean && fName.startsWith("is") && fieldName.length() > 2 && !Character.isLowerCase(fName.charAt(2))) {
+		if (isBoolean && fName.startsWith("is") && fieldName.length() > 2 && !Character.isLowerCase(fieldName.charAt(2))) {
 			// The field is for example named 'isRunning'.
-			return "set" + fName.substring(2);
+			return booleanPrefix + fName.substring(2);
 		}
 		
-		return buildName("set", fName);
+		return buildName(isBoolean ? booleanPrefix : normalPrefix, fName);
 	}
 	
 	/**
@@ -168,25 +207,7 @@ public class TransformationsUtil {
 	 * @param isBoolean if the field is of type 'boolean'. For fields of type 'java.lang.Boolean', you should provide {@code false}.
 	 */
 	public static List<String> toAllGetterNames(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
-		if (!isBoolean) return Collections.singletonList(toGetterName(accessors, fieldName, false));
-		
-		Accessors acc = accessors.getInstance();
-		fieldName = removePrefix(fieldName, acc.prefix());
-		if (fieldName == null) return Collections.emptyList();
-		
-		List<String> baseNames = toBaseNames(fieldName, isBoolean, acc.fluent());
-		
-		Set<String> names = new HashSet<String>();
-		for (String baseName : baseNames) {
-			if (acc.fluent()) {
-				names.add(baseName);
-			} else {
-				names.add(buildName("is", baseName));
-				names.add(buildName("get", baseName));
-			}
-		}
-		
-		return new ArrayList<String>(names);
+		return toAllAccessorNames(accessors, fieldName, isBoolean, "is", "get", true);
 	}
 	
 	/**
@@ -195,11 +216,35 @@ public class TransformationsUtil {
 	 * For example if {@code isBoolean} is true, then a field named {@code isRunning} would produce:<br />
 	 * {@code [setRunning, setIsRunning]}
 	 * 
+	 * @param accessors Accessors configuration.
 	 * @param fieldName the name of the field.
 	 * @param isBoolean if the field is of type 'boolean'. For fields of type 'java.lang.Boolean', you should provide {@code false}.
 	 */
 	public static List<String> toAllSetterNames(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
-		if (!isBoolean) return Collections.singletonList(toSetterName(accessors, fieldName, false));
+		return toAllAccessorNames(accessors, fieldName, isBoolean, "set", "set", true);
+	}
+	
+	/**
+	 * Returns all names of methods that would represent the wither for a field with the provided name.
+	 * 
+	 * For example if {@code isBoolean} is true, then a field named {@code isRunning} would produce:<br />
+	 * {@code [withRunning, withIsRunning]}
+	 * 
+	 * @param accessors Accessors configuration.
+	 * @param fieldName the name of the field.
+	 * @param isBoolean if the field is of type 'boolean'. For fields of type 'java.lang.Boolean', you should provide {@code false}.
+	 */
+	public static List<String> toAllWitherNames(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean) {
+		return toAllAccessorNames(accessors, fieldName, isBoolean, "with", "with", false);
+	}
+	
+	private static List<String> toAllAccessorNames(AnnotationValues<Accessors> accessors, CharSequence fieldName, boolean isBoolean,
+			String booleanPrefix, String normalPrefix, boolean adhereToFluent) {
+		
+		if (!isBoolean) {
+			String accessorName = toAccessorName(accessors, fieldName, false, booleanPrefix, normalPrefix, adhereToFluent);
+			return (accessorName == null) ? Collections.<String>emptyList() : Collections.singletonList(accessorName);
+		}
 		
 		Accessors acc = accessors.getInstance();
 		fieldName = removePrefix(fieldName, acc.prefix());
@@ -209,14 +254,16 @@ public class TransformationsUtil {
 		
 		Set<String> names = new HashSet<String>();
 		for (String baseName : baseNames) {
-			if (acc.fluent()) {
+			if (adhereToFluent && acc.fluent()) {
 				names.add(baseName);
 			} else {
-				names.add(buildName("set", baseName));
+				names.add(buildName(normalPrefix, baseName));
+				if (!normalPrefix.equals(booleanPrefix)) names.add(buildName(booleanPrefix, baseName));
 			}
 		}
 		
 		return new ArrayList<String>(names);
+		
 	}
 	
 	private static List<String> toBaseNames(CharSequence fieldName, boolean isBoolean, boolean fluent) {

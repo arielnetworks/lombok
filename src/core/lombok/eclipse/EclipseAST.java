@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2010 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,15 +21,18 @@
  */
 package lombok.eclipse;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import org.eclipse.jdt.internal.compiler.CompilationResult;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import lombok.Lombok;
 import lombok.core.AST;
+import lombok.core.LombokImmutableList;
 
-import org.eclipse.jdt.core.compiler.CategorizedProblem;
-import org.eclipse.jdt.internal.compiler.CompilationResult;
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.Annotation;
@@ -42,9 +45,6 @@ import org.eclipse.jdt.internal.compiler.ast.Initializer;
 import org.eclipse.jdt.internal.compiler.ast.LocalDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.Statement;
 import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
-import org.eclipse.jdt.internal.compiler.problem.DefaultProblem;
-import org.eclipse.jdt.internal.compiler.problem.ProblemSeverities;
-import org.eclipse.jdt.internal.compiler.util.Util;
 
 /**
  * Wraps around Eclipse's internal AST view to add useful features as well as the ability to visit parents from children,
@@ -57,7 +57,7 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	 * @param ast The compilation unit, which serves as the top level node in the tree to be built.
 	 */
 	public EclipseAST(CompilationUnitDeclaration ast) {
-		super(toFileName(ast), packageDeclaration(ast), imports(ast));
+		super(toFileName(ast), packageDeclaration(ast), new EclipseImportList(ast));
 		this.compilationUnitDeclaration = ast;
 		setTop(buildCompilationUnit(ast));
 		this.completeParse = isComplete(ast);
@@ -69,16 +69,18 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 		return pkg == null ? null : Eclipse.toQualifiedName(pkg.getImportName());
 	}
 	
-	private static Collection<String> imports(CompilationUnitDeclaration cud) { 
-		List<String> imports = new ArrayList<String>();
-		if (cud.imports == null) return imports;
-		for (ImportReference imp : cud.imports) {
-			if (imp == null) continue;
-			String qualifiedName = Eclipse.toQualifiedName(imp.getImportName());
-			if ((imp.bits & ASTNode.OnDemand) != 0) qualifiedName += ".*";
-			imports.add(qualifiedName);
-		}
-		return imports;
+	@Override public int getSourceVersion() {
+		long sl = compilationUnitDeclaration.problemReporter.options.sourceLevel;
+		long cl = compilationUnitDeclaration.problemReporter.options.complianceLevel;
+		sl >>= 16;
+		cl >>= 16;
+		if (sl == 0) sl = cl;
+		if (cl == 0) cl = sl;
+		return Math.min((int)(sl - 44), (int)(cl - 44));
+	}
+	
+	@Override public int getLatestJavaSpecSupported() {
+		return Eclipse.getEcjCompilerVersion();
 	}
 	
 	/**
@@ -90,8 +92,10 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	}
 	
 	void traverseChildren(EclipseASTVisitor visitor, EclipseNode node) {
-		for (EclipseNode child : node.down()) {
-			child.traverse(visitor);
+		LombokImmutableList<EclipseNode> children = node.down();
+		int len = children.size();
+		for (int i = 0; i < len; i++) {
+			children.get(i).traverse(visitor);
 		}
 	}
 	
@@ -120,7 +124,8 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 		}
 		
 		void addToCompilationResult() {
-			addProblemToCompilationResult((CompilationUnitDeclaration) top().get(),
+			CompilationUnitDeclaration cud = (CompilationUnitDeclaration) top().get();
+			addProblemToCompilationResult(cud.getFileName(), cud.compilationResult,
 					isWarning, message, sourceStart, sourceEnd);
 		}
 	}
@@ -144,44 +149,24 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	 * Adds a problem to the provided CompilationResult object so that it will show up
 	 * in the Problems/Warnings view.
 	 */
-	public static void addProblemToCompilationResult(CompilationUnitDeclaration ast,
+	public static void addProblemToCompilationResult(char[] fileNameArray, CompilationResult result,
 			boolean isWarning, String message, int sourceStart, int sourceEnd) {
-		if (ast.compilationResult == null) return;
-		char[] fileNameArray = ast.getFileName();
-		if (fileNameArray == null) fileNameArray = "(unknown).java".toCharArray();
-		int lineNumber = 0;
-		int columnNumber = 1;
-		CompilationResult result = ast.compilationResult;
-		int[] lineEnds = null;
-		lineNumber = sourceStart >= 0
-				? Util.getLineNumber(sourceStart, lineEnds = result.getLineSeparatorPositions(), 0, lineEnds.length-1)
-				: 0;
-		columnNumber = sourceStart >= 0
-				? Util.searchColumnNumber(result.getLineSeparatorPositions(), lineNumber,sourceStart)
-				: 0;
-		
-		CategorizedProblem ecProblem = new LombokProblem(
-				fileNameArray, message, 0, new String[0],
-				isWarning ? ProblemSeverities.Warning : ProblemSeverities.Error,
-				sourceStart, sourceEnd, lineNumber, columnNumber);
-		ast.compilationResult.record(ecProblem, null);
-	}
-	
-	private static class LombokProblem extends DefaultProblem {
-		private static final String MARKER_ID = "org.eclipse.jdt.apt.pluggable.core.compileProblem";  //$NON-NLS-1$
-		
-		public LombokProblem(char[] originatingFileName, String message, int id,
-				String[] stringArguments, int severity,
-				int startPosition, int endPosition, int line, int column) {
-			super(originatingFileName, message, id, stringArguments, severity, startPosition, endPosition, line, column);
-		}
-		
-		@Override public int getCategoryID() {
-			return CAT_UNSPECIFIED;
-		}
-		
-		@Override public String getMarkerType() {
-			return MARKER_ID;
+		try {
+			EcjReflectionCheck.addProblemToCompilationResult.invoke(null, fileNameArray, result, isWarning, message, sourceStart, sourceEnd);
+		} catch (NoClassDefFoundError e) {
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here.
+		} catch (IllegalAccessException e) {
+			throw Lombok.sneakyThrow(e);
+		} catch (InvocationTargetException e) {
+			throw Lombok.sneakyThrow(e);
+		} catch (NullPointerException e) {
+			if (!"false".equals(System.getProperty("lombok.debug.reflection", "false"))) {
+				e.initCause(EcjReflectionCheck.problem);
+				throw e;
+			}
+			//ignore, we don't have access to the correct ECJ classes, so lombok can't possibly
+			//do anything useful here.
 		}
 	}
 	
@@ -371,5 +356,26 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	 * entirely correct according to the JLS spec (only some expressions can be used as statements, not all of them). */
 	@Override protected Collection<Class<? extends ASTNode>> getStatementTypes() {
 		return Collections.<Class<? extends ASTNode>>singleton(Statement.class);
+	}
+	
+	private static class EcjReflectionCheck {
+		private static final String COMPILATIONRESULT_TYPE = "org.eclipse.jdt.internal.compiler.CompilationResult";
+		
+		public static Method addProblemToCompilationResult;
+		public static final Throwable problem;
+		
+		static {
+			Throwable problem_ = null;
+			Method m = null;
+			try {
+				m = EclipseAstProblemView.class.getMethod("addProblemToCompilationResult", char[].class, Class.forName(COMPILATIONRESULT_TYPE), boolean.class, String.class, int.class, int.class);
+			} catch (Throwable t) {
+				// That's problematic, but as long as no local classes are used we don't actually need it.
+				// Better fail on local classes than crash altogether.
+				problem_ = t;
+			}
+			addProblemToCompilationResult = m;
+			problem = problem_;
+		}
 	}
 }

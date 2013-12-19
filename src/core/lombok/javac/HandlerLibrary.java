@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2011 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +25,17 @@ import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.WeakHashMap;
 
 import javax.annotation.processing.Messager;
 import javax.tools.Diagnostic;
 
-import lombok.core.PrintAST;
+import lombok.core.HandlerPriority;
 import lombok.core.SpiLoadUtil;
 import lombok.core.TypeLibrary;
 import lombok.core.TypeResolver;
@@ -52,9 +55,8 @@ import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 public class HandlerLibrary {
 	private final TypeLibrary typeLibrary = new TypeLibrary();
 	private final Map<String, AnnotationHandlerContainer<?>> annotationHandlers = new HashMap<String, AnnotationHandlerContainer<?>>();
-	private final Collection<JavacASTVisitor> visitorHandlers = new ArrayList<JavacASTVisitor>();
+	private final Collection<VisitorContainer> visitorHandlers = new ArrayList<VisitorContainer>();
 	private final Messager messager;
-	private int phase = 0;
 	
 	/**
 	 * Creates a new HandlerLibrary that will report any problems or errors to the provided messager.
@@ -64,22 +66,78 @@ public class HandlerLibrary {
 		this.messager = messager;
 	}
 	
+	private static class VisitorContainer {
+		private final JavacASTVisitor visitor;
+		private final long priority;
+		private final boolean resolutionResetNeeded;
+		
+		VisitorContainer(JavacASTVisitor visitor) {
+			this.visitor = visitor;
+			HandlerPriority hp = visitor.getClass().getAnnotation(HandlerPriority.class);
+			this.priority = hp == null ? 0L : (((long)hp.value()) << 32) + hp.subValue();
+			this.resolutionResetNeeded = visitor.getClass().isAnnotationPresent(ResolutionResetNeeded.class);
+		}
+		
+		public long getPriority() {
+			return priority;
+		}
+		
+		public boolean isResolutionResetNeeded() {
+			return resolutionResetNeeded;
+		}
+	}
+	
 	private static class AnnotationHandlerContainer<T extends Annotation> {
-		private JavacAnnotationHandler<T> handler;
-		private Class<T> annotationClass;
+		private final JavacAnnotationHandler<T> handler;
+		private final Class<T> annotationClass;
+		private final long priority;
+		private final boolean resolutionResetNeeded;
 		
 		AnnotationHandlerContainer(JavacAnnotationHandler<T> handler, Class<T> annotationClass) {
 			this.handler = handler;
 			this.annotationClass = annotationClass;
-		}
-		
-		public boolean isResolutionBased() {
-			return handler.isResolutionBased();
+			HandlerPriority hp = handler.getClass().getAnnotation(HandlerPriority.class);
+			this.priority = hp == null ? 0L : (((long)hp.value()) << 32) + hp.subValue();
+			this.resolutionResetNeeded = handler.getClass().isAnnotationPresent(ResolutionResetNeeded.class);
 		}
 		
 		public void handle(final JavacNode node) {
 			handler.handle(JavacHandlerUtil.createAnnotation(annotationClass, node), (JCAnnotation)node.get(), node);
 		}
+		
+		public long getPriority() {
+			return priority;
+		}
+		
+		public boolean isResolutionResetNeeded() {
+			return resolutionResetNeeded;
+		}
+	}
+	
+	private SortedSet<Long> priorities;
+	private SortedSet<Long> prioritiesRequiringResolutionReset;
+	
+	public SortedSet<Long> getPriorities() {
+		return priorities;
+	}
+	
+	public SortedSet<Long> getPrioritiesRequiringResolutionReset() {
+		return prioritiesRequiringResolutionReset;
+	}
+	
+	private void calculatePriorities() {
+		SortedSet<Long> set = new TreeSet<Long>();
+		SortedSet<Long> resetNeeded = new TreeSet<Long>();
+		for (AnnotationHandlerContainer<?> container : annotationHandlers.values()) {
+			set.add(container.getPriority());
+			if (container.isResolutionResetNeeded()) resetNeeded.add(container.getPriority());
+		}
+		for (VisitorContainer container : visitorHandlers) {
+			set.add(container.getPriority());
+			if (container.isResolutionResetNeeded()) resetNeeded.add(container.getPriority());
+		}
+		this.priorities = Collections.unmodifiableSortedSet(set);
+		this.prioritiesRequiringResolutionReset = Collections.unmodifiableSortedSet(resetNeeded);
 	}
 	
 	/**
@@ -97,6 +155,8 @@ public class HandlerLibrary {
 			System.err.println("Lombok isn't running due to misconfigured SPI files: " + e);
 		}
 		
+		library.calculatePriorities();
+		
 		return library;
 	}
 	
@@ -105,11 +165,11 @@ public class HandlerLibrary {
 	private static void loadAnnotationHandlers(HandlerLibrary lib) throws IOException {
 		//No, that seemingly superfluous reference to JavacAnnotationHandler's classloader is not in fact superfluous!
 		for (JavacAnnotationHandler handler : SpiLoadUtil.findServices(JavacAnnotationHandler.class, JavacAnnotationHandler.class.getClassLoader())) {
-			Class<? extends Annotation> annotationClass =
-				SpiLoadUtil.findAnnotationClass(handler.getClass(), JavacAnnotationHandler.class);
+			Class<? extends Annotation> annotationClass = handler.getAnnotationHandledByThisHandler();
 			AnnotationHandlerContainer<?> container = new AnnotationHandlerContainer(handler, annotationClass);
-			if (lib.annotationHandlers.put(container.annotationClass.getName(), container) != null) {
-				lib.javacWarning("Duplicate handlers for annotation type: " + container.annotationClass.getName());
+			String annotationClassName = container.annotationClass.getName().replace("$", ".");
+			if (lib.annotationHandlers.put(annotationClassName, container) != null) {
+				lib.javacWarning("Duplicate handlers for annotation type: " + annotationClassName);
 			}
 			lib.typeLibrary.addType(container.annotationClass.getName());
 		}
@@ -119,7 +179,7 @@ public class HandlerLibrary {
 	private static void loadVisitorHandlers(HandlerLibrary lib) throws IOException {
 		//No, that seemingly superfluous reference to JavacASTVisitor's classloader is not in fact superfluous!
 		for (JavacASTVisitor visitor : SpiLoadUtil.findServices(JavacASTVisitor.class, JavacASTVisitor.class.getClassLoader())) {
-			lib.visitorHandlers.add(visitor);
+			lib.visitorHandlers.add(new VisitorContainer(visitor));
 		}
 	}
 	
@@ -170,61 +230,35 @@ public class HandlerLibrary {
 	 * @param node The Lombok AST Node representing the Annotation AST Node.
 	 * @param annotation 'node.get()' - convenience parameter.
 	 */
-	public void handleAnnotation(JCCompilationUnit unit, JavacNode node, JCAnnotation annotation) {
-		TypeResolver resolver = new TypeResolver(node.getPackageDeclaration(), node.getImportStatements());
+	public void handleAnnotation(JCCompilationUnit unit, JavacNode node, JCAnnotation annotation, long priority) {
+		TypeResolver resolver = new TypeResolver(node.getImportList());
 		String rawType = annotation.annotationType.toString();
-		for (String fqn : resolver.findTypeMatches(node, typeLibrary, rawType)) {
-			boolean isPrintAST = fqn.equals(PrintAST.class.getName());
-			if (isPrintAST && phase != 2) continue;
-			if (!isPrintAST && phase == 2) continue;
-			AnnotationHandlerContainer<?> container = annotationHandlers.get(fqn);
-			if (container == null) continue;
-			
-			try {
-				if (container.isResolutionBased() && phase == 1) {
-					if (checkAndSetHandled(annotation)) container.handle(node);
-				}
-				if (!container.isResolutionBased() && phase == 0) {
-					if (checkAndSetHandled(annotation)) container.handle(node);
-				}
-				if (container.annotationClass == PrintAST.class && phase == 2) {
-					if (checkAndSetHandled(annotation)) container.handle(node);
-				}
-			} catch (AnnotationValueDecodeFail fail) {
-				fail.owner.setError(fail.getMessage(), fail.idx);
-			} catch (Throwable t) {
-				String sourceName = "(unknown).java";
-				if (unit != null && unit.sourcefile != null) sourceName = unit.sourcefile.getName();
-				javacError(String.format("Lombok annotation handler %s failed on " + sourceName, container.handler.getClass()), t);
+		String fqn = resolver.typeRefToFullyQualifiedName(node, typeLibrary, rawType);
+		if (fqn == null) return;
+		AnnotationHandlerContainer<?> container = annotationHandlers.get(fqn);
+		if (container == null) return;
+		
+		try {
+			if (container.getPriority() == priority) {
+				if (checkAndSetHandled(annotation)) container.handle(node);
 			}
+		} catch (AnnotationValueDecodeFail fail) {
+			fail.owner.setError(fail.getMessage(), fail.idx);
+		} catch (Throwable t) {
+			String sourceName = "(unknown).java";
+			if (unit != null && unit.sourcefile != null) sourceName = unit.sourcefile.getName();
+			javacError(String.format("Lombok annotation handler %s failed on " + sourceName, container.handler.getClass()), t);
 		}
 	}
 	
 	/**
 	 * Will call all registered {@link JavacASTVisitor} instances.
 	 */
-	public void callASTVisitors(JavacAST ast) {
-		for (JavacASTVisitor visitor : visitorHandlers) try {
-			if (!visitor.isResolutionBased() && phase == 0) ast.traverse(visitor);
-			if (visitor.isResolutionBased() && phase == 1) ast.traverse(visitor);
+	public void callASTVisitors(JavacAST ast, long priority) {
+		for (VisitorContainer container : visitorHandlers) try {
+			if (container.getPriority() == priority) ast.traverse(container.visitor);
 		} catch (Throwable t) {
-			javacError(String.format("Lombok visitor handler %s failed", visitor.getClass()), t);
+			javacError(String.format("Lombok visitor handler %s failed", container.visitor.getClass()), t);
 		}
-	}
-	
-	/**
-	 * Lombok does not currently support triggering annotations in a specified order; the order is essentially
-	 * random right now. As a temporary hack we've identified 3 important phases.
-	 */
-	public void setPreResolutionPhase() {
-		phase = 0;
-	}
-	
-	public void setPostResolutionPhase() {
-		phase = 1;
-	}
-	
-	public void setPrintASTPhase() {
-		phase = 2;
 	}
 }

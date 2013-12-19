@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 The Project Lombok Authors.
+ * Copyright (C) 2010-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
  */
 package lombok.eclipse.handlers;
 
-import static lombok.eclipse.Eclipse.fromQualifiedName;
+import static lombok.eclipse.Eclipse.*;
 import static lombok.eclipse.handlers.EclipseHandlerUtil.*;
 
 import java.lang.reflect.Modifier;
@@ -73,6 +73,8 @@ public class HandleLog {
 			
 			FieldDeclaration fieldDeclaration = createField(framework, source, loggingType);
 			fieldDeclaration.traverse(new SetGeneratedByVisitor(source), typeDecl.staticInitializerScope);
+			// TODO temporary workaround for issue 217. http://code.google.com/p/projectlombok/issues/detail?id=217
+			// injectFieldSuppressWarnings(owner, fieldDeclaration);
 			injectField(owner, fieldDeclaration);
 			owner.rebuild();
 			break;
@@ -178,12 +180,32 @@ public class HandleLog {
 	}
 	
 	/**
+	 * Handles the {@link lombok.extern.log4j.Log4j2} annotation for Eclipse.
+	 */
+	@ProviderFor(EclipseAnnotationHandler.class)
+	public static class HandleLog4j2Log extends EclipseAnnotationHandler<lombok.extern.log4j.Log4j2> {
+		@Override public void handle(AnnotationValues<lombok.extern.log4j.Log4j2> annotation, Annotation source, EclipseNode annotationNode) {
+			processAnnotation(LoggingFramework.LOG4J2, annotation, source, annotationNode);
+		}
+	}
+	
+	/**
 	 * Handles the {@link lombok.extern.slf4j.Slf4j} annotation for Eclipse.
 	 */
 	@ProviderFor(EclipseAnnotationHandler.class)
 	public static class HandleSlf4jLog extends EclipseAnnotationHandler<lombok.extern.slf4j.Slf4j> {
 		@Override public void handle(AnnotationValues<lombok.extern.slf4j.Slf4j> annotation, Annotation source, EclipseNode annotationNode) {
 			processAnnotation(LoggingFramework.SLF4J, annotation, source, annotationNode);
+		}
+	}
+	
+	/**
+	 * Handles the {@link lombok.extern.slf4j.XSlf4j} annotation for Eclipse.
+	 */
+	@ProviderFor(EclipseAnnotationHandler.class)
+	public static class HandleXSlf4jLog extends EclipseAnnotationHandler<lombok.extern.slf4j.XSlf4j> {
+		@Override public void handle(AnnotationValues<lombok.extern.slf4j.XSlf4j> annotation, Annotation source, EclipseNode annotationNode) {
+			processAnnotation(LoggingFramework.XSLF4J, annotation, source, annotationNode);
 		}
 	}
 	
@@ -214,8 +236,14 @@ public class HandleLog {
 		// private static final org.apache.log4j.Logger log = org.apache.log4j.Logger.getLogger(TargetType.class);
 		LOG4J("org.apache.log4j.Logger", "org.apache.log4j.Logger", "getLogger", "@Log4j"),
 
+		// private static final org.apache.logging.log4j.Logger log = org.apache.logging.log4j.LogManager.getLogger(TargetType.class);
+		LOG4J2("org.apache.logging.log4j.Logger", "org.apache.logging.log4j.LogManager", "getLogger", "@Log4j2"),
+
 		// private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TargetType.class);
 		SLF4J("org.slf4j.Logger", "org.slf4j.LoggerFactory", "getLogger", "@Slf4j"),
+		
+		// private static final org.slf4j.ext.XLogger log = org.slf4j.ext.XLoggerFactory.getXLogger(TargetType.class);
+		XSLF4J("org.slf4j.ext.XLogger", "org.slf4j.ext.XLoggerFactory", "getXLogger", "@XSlf4j"),
 		
 		;
 		

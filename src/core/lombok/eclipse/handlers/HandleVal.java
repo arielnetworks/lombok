@@ -22,6 +22,8 @@
 package lombok.eclipse.handlers;
 
 import lombok.val;
+import lombok.core.HandlerPriority;
+import lombok.eclipse.DeferUntilPostDiet;
 import lombok.eclipse.EclipseASTAdapter;
 import lombok.eclipse.EclipseASTVisitor;
 import lombok.eclipse.EclipseNode;
@@ -36,11 +38,9 @@ import org.mangosdk.spi.ProviderFor;
  * This class just handles 3 basic error cases. The real meat of eclipse 'val' support is in {@code PatchVal} and {@code PatchValEclipse}.
  */
 @ProviderFor(EclipseASTVisitor.class)
+@DeferUntilPostDiet
+@HandlerPriority(65536) // 2^16; resolution needs to work, so if the RHS expression is i.e. a call to a generated getter, we have to run after that getter has been generated.
 public class HandleVal extends EclipseASTAdapter {
-	@Override public boolean deferUntilPostDiet() {
-		return false;
-	}
-	
 	@Override public void visitLocal(EclipseNode localNode, LocalDeclaration local) {
 		if (!EclipseHandlerUtil.typeMatches(val.class, localNode, local.type)) return;
 		boolean variableOfForEach = false;

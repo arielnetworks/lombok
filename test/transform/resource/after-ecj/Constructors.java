@@ -25,6 +25,14 @@
     return new RequiredArgsConstructorStaticName(x);
   }
 }
+@lombok.RequiredArgsConstructor() class RequiredArgsConstructorWithAnnotations {
+  final int x;
+  String name;
+  public @Deprecated @java.beans.ConstructorProperties({"x"}) @java.lang.SuppressWarnings("all") RequiredArgsConstructorWithAnnotations(final int x) {
+    super();
+    this.x = x;
+  }
+}
 @lombok.AllArgsConstructor class AllArgsConstructor1 {
   final int x;
   String name;
@@ -50,5 +58,16 @@
   }
   public static @java.lang.SuppressWarnings("all") <T extends Number>RequiredArgsConstructorStaticNameGenerics<T> of(final T x) {
     return new RequiredArgsConstructorStaticNameGenerics<T>(x);
+  }
+}
+@lombok.RequiredArgsConstructor(staticName = "of") class RequiredArgsConstructorStaticNameGenerics2<T extends Number> {
+  final Class<T> x;
+  String name;
+  private @java.lang.SuppressWarnings("all") RequiredArgsConstructorStaticNameGenerics2(final Class<T> x) {
+    super();
+    this.x = x;
+  }
+  public static @java.lang.SuppressWarnings("all") <T extends Number>RequiredArgsConstructorStaticNameGenerics2<T> of(final Class<T> x) {
+    return new RequiredArgsConstructorStaticNameGenerics2<T>(x);
   }
 }

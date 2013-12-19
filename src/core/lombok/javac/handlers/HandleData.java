@@ -21,18 +21,17 @@
  */
 package lombok.javac.handlers;
 
-import static lombok.javac.handlers.JavacHandlerUtil.deleteAnnotationIfNeccessary;
+import static lombok.javac.handlers.JavacHandlerUtil.*;
 import lombok.AccessLevel;
 import lombok.Data;
 import lombok.core.AnnotationValues;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
+import lombok.javac.handlers.HandleConstructor.SkipIfConstructorExists;
 
 import org.mangosdk.spi.ProviderFor;
 
-import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
-import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 
 /**
  * Handles the {@code lombok.Data} annotation for javac.
@@ -42,12 +41,9 @@ public class HandleData extends JavacAnnotationHandler<Data> {
 	@Override public void handle(AnnotationValues<Data> annotation, JCAnnotation ast, JavacNode annotationNode) {
 		deleteAnnotationIfNeccessary(annotationNode, Data.class);
 		JavacNode typeNode = annotationNode.up();
-		JCClassDecl typeDecl = null;
-		if (typeNode.get() instanceof JCClassDecl) typeDecl = (JCClassDecl)typeNode.get();
-		long flags = typeDecl == null ? 0 : typeDecl.mods.flags;
-		boolean notAClass = (flags & (Flags.INTERFACE | Flags.ENUM | Flags.ANNOTATION)) != 0;
+		boolean notAClass = !isClass(typeNode);
 		
-		if (typeDecl == null || notAClass) {
+		if (notAClass) {
 			annotationNode.addError("@Data is only supported on a class.");
 			return;
 		}
@@ -55,7 +51,7 @@ public class HandleData extends JavacAnnotationHandler<Data> {
 		String staticConstructorName = annotation.getInstance().staticConstructor();
 		
 		// TODO move this to the end OR move it to the top in eclipse.
-		new HandleConstructor().generateRequiredArgsConstructor(typeNode, AccessLevel.PUBLIC, staticConstructorName, true, annotationNode);
+		new HandleConstructor().generateRequiredArgsConstructor(typeNode, AccessLevel.PUBLIC, staticConstructorName, SkipIfConstructorExists.YES, annotationNode);
 		new HandleGetter().generateGetterForType(typeNode, annotationNode, AccessLevel.PUBLIC, true);
 		new HandleSetter().generateSetterForType(typeNode, annotationNode, AccessLevel.PUBLIC, true);
 		new HandleEqualsAndHashCode().generateEqualsAndHashCodeForType(typeNode, annotationNode);

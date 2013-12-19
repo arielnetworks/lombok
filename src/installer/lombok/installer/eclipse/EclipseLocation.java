@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2010 The Project Lombok Authors.
+ * Copyright (C) 2009-2012 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,9 +111,13 @@ public class EclipseLocation extends IdeLocation {
 			BufferedReader br = new BufferedReader(new InputStreamReader(fis));
 			String line;
 			while ((line = br.readLine()) != null) {
-				if (JAVA_AGENT_LINE_MATCHER.matcher(line.trim()).matches()) return true;
+				if (JAVA_AGENT_LINE_MATCHER.matcher(line.trim()).matches()) {
+					br.close();
+					return true;
+				}
 			}
 			
+			br.close();
 			return false;
 		} finally {
 			fis.close();
@@ -172,7 +176,7 @@ public class EclipseLocation extends IdeLocation {
 						
 						newContents.append(line).append(OS_NEWLINE);
 					}
-					
+					br.close();
 				} finally {
 					fis.close();
 				}
@@ -324,6 +328,7 @@ public class EclipseLocation extends IdeLocation {
 					
 					newContents.append(line).append(OS_NEWLINE);
 				}
+				br.close();
 			} finally {
 				fis.close();
 			}

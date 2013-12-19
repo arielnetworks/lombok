@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 The Project Lombok Authors.
+ * Copyright (C) 2010-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -74,6 +74,10 @@ public class PatchFixes {
 	
 	public static boolean returnFalse(java.lang.Object object) {
 		return false;
+	}
+	
+	public static boolean returnTrue(java.lang.Object object) {
+		return true;
 	}
 	
 	@java.lang.SuppressWarnings({"unchecked", "rawtypes"}) public static java.util.List removeGeneratedNodes(java.util.List list) {

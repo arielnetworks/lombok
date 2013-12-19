@@ -28,6 +28,16 @@ class RequiredArgsConstructorStaticName {
 		return new RequiredArgsConstructorStaticName(x);
 	}
 }
+class RequiredArgsConstructorWithAnnotations {
+	final int x;
+	String name;
+	@java.beans.ConstructorProperties({"x"})
+	@Deprecated
+	@java.lang.SuppressWarnings("all")
+	public RequiredArgsConstructorWithAnnotations(final int x) {
+		this.x = x;
+	}
+}
 class AllArgsConstructor1 {
 	final int x;
 	String name;
@@ -57,5 +67,19 @@ class RequiredArgsConstructorStaticNameGenerics<T extends Number> {
 	@java.lang.SuppressWarnings("all")
 	public static <T extends Number> RequiredArgsConstructorStaticNameGenerics<T> of(final T x) {
 		return new RequiredArgsConstructorStaticNameGenerics<T>(x);
+	}
+}
+class RequiredArgsConstructorStaticNameGenerics2<T extends Number> {
+	final Class<T> x;
+	String name;
+	
+	@java.lang.SuppressWarnings("all")
+	private RequiredArgsConstructorStaticNameGenerics2(final Class<T> x) {
+		this.x = x;
+	}
+	
+	@java.lang.SuppressWarnings("all")
+	public static <T extends Number> RequiredArgsConstructorStaticNameGenerics2<T> of(final Class<T> x) {
+		return new RequiredArgsConstructorStaticNameGenerics2<T>(x);
 	}
 }

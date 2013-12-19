@@ -28,6 +28,9 @@ import java.lang.annotation.Target;
 
 /**
  * A container for settings for the generation of getters and setters.
+ * <p>
+ * Complete documentation is found at <a href="http://projectlombok.org/features/experimental/Accessors.html">the project lombok features page for &#64;Accessors</a>.
+ * <p>
  * Using this annotation does nothing by itself; an annotation that makes lombok generate getters and setters,
  * such as {@link lombok.Setter} or {@link lombok.Data} is also required.
  */
@@ -49,7 +52,8 @@ public @interface Accessors {
 	
 	/**
 	 * If present, only fields with any of the stated prefixes are given the getter/setter treatment.
-	 * Note that a prefix only counts if the next character is NOT a lowercase character. If multiple fields
+	 * Note that a prefix only counts if the next character is NOT a lowercase character or the last
+	 * letter of the prefix is not a letter (for instance an underscore). If multiple fields
 	 * all turn into the same name when the prefix is stripped, an error will be generated.
 	 */
 	String[] prefix() default {};

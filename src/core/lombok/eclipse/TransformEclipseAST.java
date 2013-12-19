@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2011 The Project Lombok Authors.
+ * Copyright (C) 2009-2012 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
  */
 package lombok.eclipse;
 
-import static lombok.eclipse.handlers.EclipseHandlerUtil.error;
+import static lombok.eclipse.handlers.EclipseHandlerUtil.*;
 
 import java.lang.reflect.Field;
 
@@ -62,25 +62,31 @@ public class TransformEclipseAST {
 		Field f = null;
 		HandlerLibrary h = null;
 		
-		try {
-			h = HandlerLibrary.load();
-		} catch (Throwable t) {
-			try {
-				error(null, "Problem initializing lombok", t);
-			} catch (Throwable t2) {
-				System.err.println("Problem initializing lombok");
-				t.printStackTrace();
-			}
+		if (System.getProperty("lombok.disable") != null) {
 			disableLombok = true;
+			astCacheField = null;
+			handlers = null;
+		} else {
+			try {
+				h = HandlerLibrary.load();
+			} catch (Throwable t) {
+				try {
+					error(null, "Problem initializing lombok", t);
+				} catch (Throwable t2) {
+					System.err.println("Problem initializing lombok");
+					t.printStackTrace();
+				}
+				disableLombok = true;
+			}
+			try {
+				f = CompilationUnitDeclaration.class.getDeclaredField("$lombokAST");
+			} catch (Throwable t) {
+				//I guess we're in an ecj environment; we'll just not cache stuff then.
+			}
+			
+			astCacheField = f;
+			handlers = h;
 		}
-		try {
-			f = CompilationUnitDeclaration.class.getDeclaredField("$lombokAST");
-		} catch (Throwable t) {
-			//I guess we're in an ecj environment; we'll just not cache stuff then.
-		}
-		
-		astCacheField = f;
-		handlers = h;
 	}
 	
 	public static void transform_swapped(CompilationUnitDeclaration ast, Parser parser) {
@@ -138,7 +144,7 @@ public class TransformEclipseAST {
 			try {
 				String message = "Lombok can't parse this source: " + t.toString();
 				
-				EclipseAST.addProblemToCompilationResult(ast, false, message, 0, 0);
+				EclipseAST.addProblemToCompilationResult(ast.getFileName(), ast.compilationResult, false, message, 0, 0);
 				t.printStackTrace();
 			} catch (Throwable t2) {
 				try {
@@ -165,45 +171,42 @@ public class TransformEclipseAST {
 	 * then handles any PrintASTs.
 	 */
 	public void go() {
-		ast.traverse(new AnnotationVisitor(true));
-		handlers.callASTVisitors(ast);
-		ast.traverse(new AnnotationVisitor(false));
+		for (Long d : handlers.getPriorities()) {
+			ast.traverse(new AnnotationVisitor(d));
+			handlers.callASTVisitors(ast, d, ast.isCompleteParse());
+		}
 	}
 	
 	private static class AnnotationVisitor extends EclipseASTAdapter {
-		private final boolean skipPrintAst;
+		private final long priority;
 		
-		public AnnotationVisitor(boolean skipAllButPrintAST) {
-			this.skipPrintAst = skipAllButPrintAST;
-		}
-		
-		public boolean deferUntilPostDiet() {
-			return false;
+		public AnnotationVisitor(long priority) {
+			this.priority = priority;
 		}
 		
 		@Override public void visitAnnotationOnField(FieldDeclaration field, EclipseNode annotationNode, Annotation annotation) {
 			CompilationUnitDeclaration top = (CompilationUnitDeclaration) annotationNode.top().get();
-			handlers.handleAnnotation(top, annotationNode, annotation, skipPrintAst);
+			handlers.handleAnnotation(top, annotationNode, annotation, priority);
 		}
 		
 		@Override public void visitAnnotationOnMethodArgument(Argument arg, AbstractMethodDeclaration method, EclipseNode annotationNode, Annotation annotation) {
 			CompilationUnitDeclaration top = (CompilationUnitDeclaration) annotationNode.top().get();
-			handlers.handleAnnotation(top, annotationNode, annotation, skipPrintAst);
+			handlers.handleAnnotation(top, annotationNode, annotation, priority);
 		}
 		
 		@Override public void visitAnnotationOnLocal(LocalDeclaration local, EclipseNode annotationNode, Annotation annotation) {
 			CompilationUnitDeclaration top = (CompilationUnitDeclaration) annotationNode.top().get();
-			handlers.handleAnnotation(top, annotationNode, annotation, skipPrintAst);
+			handlers.handleAnnotation(top, annotationNode, annotation, priority);
 		}
 		
 		@Override public void visitAnnotationOnMethod(AbstractMethodDeclaration method, EclipseNode annotationNode, Annotation annotation) {
 			CompilationUnitDeclaration top = (CompilationUnitDeclaration) annotationNode.top().get();
-			handlers.handleAnnotation(top, annotationNode, annotation, skipPrintAst);
+			handlers.handleAnnotation(top, annotationNode, annotation, priority);
 		}
 		
 		@Override public void visitAnnotationOnType(TypeDeclaration type, EclipseNode annotationNode, Annotation annotation) {
 			CompilationUnitDeclaration top = (CompilationUnitDeclaration) annotationNode.top().get();
-			handlers.handleAnnotation(top, annotationNode, annotation, skipPrintAst);
+			handlers.handleAnnotation(top, annotationNode, annotation, priority);
 		}
 	}
 }

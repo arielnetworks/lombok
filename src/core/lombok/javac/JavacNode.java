@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2010 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@ import lombok.core.AST.Kind;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.model.JavacTypes;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -50,6 +49,15 @@ public class JavacNode extends lombok.core.LombokNode<JavacAST, JavacNode, JCTre
 	 */
 	public JavacNode(JavacAST ast, JCTree node, List<JavacNode> children, Kind kind) {
 		super(ast, node, children, kind);
+	}
+	
+	public int getEndPosition(DiagnosticPosition pos) {
+		JCCompilationUnit cu = (JCCompilationUnit) top().get();
+		return Javac.getEndPosition(pos, cu);
+	}
+	
+	public int getEndPosition() {
+		return getEndPosition(node);
 	}
 	
 	/**
@@ -165,7 +173,7 @@ public class JavacNode extends lombok.core.LombokNode<JavacAST, JavacNode, JCTre
 	 * 
 	 * @see JavacAST#getTreeMaker()
 	 */
-	public TreeMaker getTreeMaker() {
+	public JavacTreeMaker getTreeMaker() {
 		return ast.getTreeMaker();
 	}
 	
@@ -209,31 +217,35 @@ public class JavacNode extends lombok.core.LombokNode<JavacAST, JavacNode, JCTre
 		return ast.toName(name);
 	}
 	
+	public void removeDeferredErrors() {
+		ast.removeDeferredErrors(this);
+	}
+	
 	/**
 	 * Generates an compiler error focused on the AST node represented by this node object.
 	 */
 	@Override public void addError(String message) {
-		ast.printMessage(Diagnostic.Kind.ERROR, message, this, null);
+		ast.printMessage(Diagnostic.Kind.ERROR, message, this, null, true);
 	}
 	
 	/**
 	 * Generates an compiler error focused on the AST node represented by this node object.
 	 */
 	public void addError(String message, DiagnosticPosition pos) {
-		ast.printMessage(Diagnostic.Kind.ERROR, message, null, pos);
+		ast.printMessage(Diagnostic.Kind.ERROR, message, null, pos, true);
 	}
 	
 	/**
 	 * Generates a compiler warning focused on the AST node represented by this node object.
 	 */
 	@Override public void addWarning(String message) {
-		ast.printMessage(Diagnostic.Kind.WARNING, message, this, null);
+		ast.printMessage(Diagnostic.Kind.WARNING, message, this, null, false);
 	}
 	
 	/**
 	 * Generates a compiler warning focused on the AST node represented by this node object.
 	 */
 	public void addWarning(String message, DiagnosticPosition pos) {
-		ast.printMessage(Diagnostic.Kind.WARNING, message, null, pos);
+		ast.printMessage(Diagnostic.Kind.WARNING, message, null, pos, false);
 	}
 }
