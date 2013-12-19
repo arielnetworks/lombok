@@ -682,16 +682,25 @@ public class EclipseHandlerUtil {
 		List<TypeReference[]> params = new ArrayList<TypeReference[]>();
 		/* Calculate generics */ {
 			TypeBinding b = binding;
+			boolean hasEnclosingType = b.enclosingType() != null;
 			while (true) {
 				boolean isFinalStop = b.isLocalType() || !b.isMemberType() || b.enclosingType() == null;
 				
 				TypeReference[] tyParams = null;
 				if (b instanceof ParameterizedTypeBinding) {
 					ParameterizedTypeBinding paramized = (ParameterizedTypeBinding) b;
+					int objCount = 0;
+					char[] objName = {'j','a','v','a','.','l','a','n','g','.','O','b','j','e','c','t'};
 					if (paramized.arguments != null) {
 						tyParams = new TypeReference[paramized.arguments.length];
 						for (int i = 0; i < tyParams.length; i++) {
+							if (hasEnclosingType && isFinalStop && Arrays.equals(paramized.arguments[i].readableName(), objName)) {
+								objCount++;
+							}
 							tyParams[i] = makeType(paramized.arguments[i], pos, true);
+						}
+						if (objCount == tyParams.length) {
+							tyParams = null;
 						}
 					}
 				}
