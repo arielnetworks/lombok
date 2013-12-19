@@ -706,7 +706,7 @@ public class EclipseHandlerUtil {
 				}
 				
 				params.add(tyParams);
-				if (isFinalStop || tyParams != null) break;
+				if (isFinalStop) break;
 				b = b.enclosingType();
 			}
 		}
