@@ -26,11 +26,11 @@
         return false;
     return true;
   }
-  public @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
+  protected @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
     return (other instanceof DataWithGetterNone);
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-    final int PRIME = 31;
+    final int PRIME = 59;
     int result = 1;
     result = ((result * PRIME) + this.x);
     result = ((result * PRIME) + this.y);

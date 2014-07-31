@@ -23,7 +23,7 @@ final @lombok.Value class Value1 {
     return true;
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-    final int PRIME = 31;
+    final int PRIME = 59;
     int result = 1;
     result = ((result * PRIME) + this.getX());
     final java.lang.Object $name = this.getName();
@@ -64,11 +64,11 @@ final @lombok.Value class Value1 {
         return false;
     return true;
   }
-  public @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
+  protected @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
     return (other instanceof Value2);
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-    final int PRIME = 31;
+    final int PRIME = 59;
     int result = 1;
     result = ((result * PRIME) + this.getX());
     final java.lang.Object $name = this.getName();
@@ -106,7 +106,7 @@ final @Value class Value3 {
     return true;
   }
   public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-    final int PRIME = 31;
+    final int PRIME = 59;
     int result = 1;
     result = ((result * PRIME) + this.getX());
     result = ((result * PRIME) + this.getY());

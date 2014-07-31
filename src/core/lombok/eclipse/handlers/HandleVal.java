@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 The Project Lombok Authors.
+ * Copyright (C) 2010-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,8 @@
  */
 package lombok.eclipse.handlers;
 
+import static lombok.core.handlers.HandlerUtil.*;
+import lombok.ConfigurationKeys;
 import lombok.val;
 import lombok.core.HandlerPriority;
 import lombok.eclipse.DeferUntilPostDiet;
@@ -43,6 +45,8 @@ import org.mangosdk.spi.ProviderFor;
 public class HandleVal extends EclipseASTAdapter {
 	@Override public void visitLocal(EclipseNode localNode, LocalDeclaration local) {
 		if (!EclipseHandlerUtil.typeMatches(val.class, localNode, local.type)) return;
+		handleFlagUsage(localNode, ConfigurationKeys.VAL_FLAG_USAGE, "val");
+		
 		boolean variableOfForEach = false;
 		
 		if (localNode.directUp().get() instanceof ForeachStatement) {
@@ -63,6 +67,10 @@ public class HandleVal extends EclipseASTAdapter {
 		if (localNode.directUp().get() instanceof ForStatement) {
 			localNode.addError("'val' is not allowed in old-style for loops");
 			return;
+		}
+		
+		if (local.initialization != null && local.initialization.getClass().getName().equals("org.eclipse.jdt.internal.compiler.ast.LambdaExpression")) {
+			localNode.addError("'val' is not allowed with lambda expressions.");
 		}
 	}
 }

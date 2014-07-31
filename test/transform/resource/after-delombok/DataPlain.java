@@ -32,13 +32,13 @@ class Data1 {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
-	public boolean canEqual(final java.lang.Object other) {
+	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof Data1;
 	}
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
 	public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		result = result * PRIME + this.getX();
 		final java.lang.Object $name = this.getName();
@@ -85,13 +85,13 @@ class Data2 {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
-	public boolean canEqual(final java.lang.Object other) {
+	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof Data2;
 	}
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
 	public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		result = result * PRIME + this.getX();
 		final java.lang.Object $name = this.getName();
@@ -139,7 +139,7 @@ final class Data3 {
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
 	public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		result = result * PRIME + this.getX();
 		final java.lang.Object $name = this.getName();
@@ -181,13 +181,13 @@ final class Data4 extends java.util.Timer {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
-	public boolean canEqual(final java.lang.Object other) {
+	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof Data4;
 	}
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
 	public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		result = result * PRIME + super.hashCode();
 		result = result * PRIME + this.getX();
@@ -208,7 +208,7 @@ class Data5 {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
-	public boolean canEqual(final java.lang.Object other) {
+	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof Data5;
 	}
 	@java.lang.Override

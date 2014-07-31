@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2012 The Project Lombok Authors.
+ * Copyright (C) 2009-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  */
 package lombok.eclipse.handlers;
 
+import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.eclipse.handlers.EclipseHandlerUtil.*;
 
 import java.util.ArrayList;
@@ -32,12 +33,14 @@ import java.util.List;
 import java.util.Set;
 
 import lombok.AccessLevel;
+import lombok.ConfigurationKeys;
 import lombok.ToString;
-import lombok.core.AnnotationValues;
 import lombok.core.AST.Kind;
+import lombok.core.AnnotationValues;
 import lombok.eclipse.Eclipse;
 import lombok.eclipse.EclipseAnnotationHandler;
 import lombok.eclipse.EclipseNode;
+import lombok.eclipse.handlers.EclipseHandlerUtil.FieldAccess;
 
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.Annotation;
@@ -67,7 +70,7 @@ import org.mangosdk.spi.ProviderFor;
  */
 @ProviderFor(EclipseAnnotationHandler.class)
 public class HandleToString extends EclipseAnnotationHandler<ToString> {
-	private void checkForBogusFieldNames(EclipseNode type, AnnotationValues<ToString> annotation) {
+	public void checkForBogusFieldNames(EclipseNode type, AnnotationValues<ToString> annotation) {
 		if (annotation.isExplicit("exclude")) {
 			for (int i : createListOfNonExistentFields(Arrays.asList(annotation.getInstance().exclude()), type, true, false)) {
 				annotation.setWarning("exclude", "This field does not exist, or would have been excluded anyway.", i);
@@ -88,12 +91,15 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 		
 		boolean includeFieldNames = true;
 		try {
-			includeFieldNames = ((Boolean)ToString.class.getMethod("includeFieldNames").getDefaultValue()).booleanValue();
+			Boolean configuration = typeNode.getAst().readConfiguration(ConfigurationKeys.TO_STRING_INCLUDE_FIELD_NAMES);
+			includeFieldNames = configuration != null ? configuration : ((Boolean)ToString.class.getMethod("includeFieldNames").getDefaultValue()).booleanValue();
 		} catch (Exception ignore) {}
 		generateToString(typeNode, errorNode, null, null, includeFieldNames, null, false, FieldAccess.GETTER);
 	}
 	
 	public void handle(AnnotationValues<ToString> annotation, Annotation ast, EclipseNode annotationNode) {
+		handleFlagUsage(annotationNode, ConfigurationKeys.TO_STRING_FLAG_USAGE, "@ToString");
+		
 		ToString ann = annotation.getInstance();
 		List<String> excludes = Arrays.asList(ann.exclude());
 		List<String> includes = Arrays.asList(ann.of());
@@ -111,9 +117,14 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 		
 		checkForBogusFieldNames(typeNode, annotation);
 		
-		FieldAccess fieldAccess = ann.doNotUseGetters() ? FieldAccess.PREFER_FIELD : FieldAccess.GETTER;
+		Boolean doNotUseGettersConfiguration = annotationNode.getAst().readConfiguration(ConfigurationKeys.TO_STRING_DO_NOT_USE_GETTERS);
+		boolean doNotUseGetters = annotation.isExplicit("doNotUseGetters") || doNotUseGettersConfiguration == null ? ann.doNotUseGetters() : doNotUseGettersConfiguration;
+		FieldAccess fieldAccess = doNotUseGetters ? FieldAccess.PREFER_FIELD : FieldAccess.GETTER;
 		
-		generateToString(typeNode, annotationNode, excludes, includes, ann.includeFieldNames(), callSuper, true, fieldAccess);
+		Boolean fieldNamesConfiguration = annotationNode.getAst().readConfiguration(ConfigurationKeys.TO_STRING_INCLUDE_FIELD_NAMES);
+		boolean includeFieldNames = annotation.isExplicit("includeFieldNames") || fieldNamesConfiguration == null ? ann.includeFieldNames() : fieldNamesConfiguration;
+
+		generateToString(typeNode, annotationNode, excludes, includes, includeFieldNames, callSuper, true, fieldAccess);
 	}
 	
 	public void generateToString(EclipseNode typeNode, EclipseNode errorNode, List<String> excludes, List<String> includes,
@@ -170,7 +181,7 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 		}
 	}
 	
-	static MethodDeclaration createToString(EclipseNode type, Collection<EclipseNode> fields,
+	public static MethodDeclaration createToString(EclipseNode type, Collection<EclipseNode> fields,
 			boolean includeFieldNames, boolean callSuper, ASTNode source, FieldAccess fieldAccess) {
 		String typeName = getTypeName(type);
 		char[] suffix = ")".toCharArray();
@@ -282,7 +293,7 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 		return method;
 	}
 	
-	private static String getTypeName(EclipseNode type) {
+	public static String getTypeName(EclipseNode type) {
 		String typeName = getSingleTypeName(type);
 		EclipseNode upType = type.up();
 		while (upType.getKind() == Kind.TYPE) {
@@ -292,7 +303,7 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 		return typeName;
 	}
 	
-	private static String getSingleTypeName(EclipseNode type) {
+	public static String getSingleTypeName(EclipseNode type) {
 		TypeDeclaration typeDeclaration = (TypeDeclaration)type.get();
 		char[] rawTypeName = typeDeclaration.name;
 		return rawTypeName == null ? "" : new String(rawTypeName);
@@ -301,7 +312,7 @@ public class HandleToString extends EclipseAnnotationHandler<ToString> {
 	private static final Set<String> BUILT_IN_TYPES = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
 			"byte", "short", "int", "long", "char", "boolean", "double", "float")));
 	
-	private static NameReference generateQualifiedNameRef(ASTNode source, char[]... varNames) {
+	public static NameReference generateQualifiedNameRef(ASTNode source, char[]... varNames) {
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
 		NameReference ref;
