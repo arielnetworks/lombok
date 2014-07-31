@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2013 The Project Lombok Authors.
+ * Copyright (C) 2012-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,15 +21,16 @@
  */
 package lombok.javac.handlers;
 
+import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.javac.Javac.*;
 import static lombok.javac.handlers.JavacHandlerUtil.*;
 
 import java.util.Collection;
 
 import lombok.AccessLevel;
+import lombok.ConfigurationKeys;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
-import lombok.core.TransformationsUtil;
 import lombok.experimental.Wither;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
@@ -40,7 +41,6 @@ import lombok.javac.handlers.JavacHandlerUtil.FieldAccess;
 import org.mangosdk.spi.ProviderFor;
 
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -119,6 +119,8 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 	}
 	
 	@Override public void handle(AnnotationValues<Wither> annotation, JCAnnotation ast, JavacNode annotationNode) {
+		handleExperimentalFlagUsage(annotationNode, ConfigurationKeys.WITHER_FLAG_USAGE, "@Wither");
+		
 		Collection<JavacNode> fields = annotationNode.upFromAnnotationToFields();
 		deleteAnnotationIfNeccessary(annotationNode, Wither.class);
 		deleteImportFromCompilationUnit(annotationNode, "lombok.AccessLevel");
@@ -142,13 +144,13 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 		}
 	}
 	
-	private void createWitherForFields(AccessLevel level, Collection<JavacNode> fieldNodes, JavacNode errorNode, boolean whineIfExists, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
+	public void createWitherForFields(AccessLevel level, Collection<JavacNode> fieldNodes, JavacNode errorNode, boolean whineIfExists, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
 		for (JavacNode fieldNode : fieldNodes) {
 			createWitherForField(level, fieldNode, errorNode, whineIfExists, onMethod, onParam);
 		}
 	}
 	
-	private void createWitherForField(AccessLevel level, JavacNode fieldNode, JavacNode source, boolean whineIfExists, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
+	public void createWitherForField(AccessLevel level, JavacNode fieldNode, JavacNode source, boolean whineIfExists, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
 		if (fieldNode.getKind() != Kind.FIELD) {
 			fieldNode.addError("@Wither is only supported on a class or a field.");
 			return;
@@ -158,22 +160,22 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 		String methodName = toWitherName(fieldNode);
 		
 		if (methodName == null) {
-			source.addWarning("Not generating wither for this field: It does not fit your @Accessors prefix list.");
+			fieldNode.addWarning("Not generating wither for this field: It does not fit your @Accessors prefix list.");
 			return;
 		}
 		
 		if ((fieldDecl.mods.flags & Flags.STATIC) != 0) {
-			source.addWarning("Not generating wither for this field: Withers cannot be generated for static fields.");
+			fieldNode.addWarning("Not generating wither for this field: Withers cannot be generated for static fields.");
 			return;
 		}
 		
 		if ((fieldDecl.mods.flags & Flags.FINAL) != 0 && fieldDecl.init != null) {
-			source.addWarning("Not generating wither for this field: Withers cannot be generated for final, initialized fields.");
+			fieldNode.addWarning("Not generating wither for this field: Withers cannot be generated for final, initialized fields.");
 			return;
 		}
 		
 		if (fieldDecl.name.toString().startsWith("$")) {
-			source.addWarning("Not generating wither for this field: Withers cannot be generated for fields starting with $.");
+			fieldNode.addWarning("Not generating wither for this field: Withers cannot be generated for fields starting with $.");
 			return;
 		}
 		
@@ -185,7 +187,7 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 				if (whineIfExists) {
 					String altNameExpl = "";
 					if (!altName.equals(methodName)) altNameExpl = String.format(" (%s)", altName);
-					source.addWarning(
+					fieldNode.addWarning(
 						String.format("Not generating %s(): A method with that name already exists%s", methodName, altNameExpl));
 				}
 				return;
@@ -197,24 +199,24 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 		
 		long access = toJavacModifier(level);
 		
-		JCMethodDecl createdWither = createWither(access, fieldNode, fieldNode.getTreeMaker(), source.get(), onMethod, onParam);
+		JCMethodDecl createdWither = createWither(access, fieldNode, fieldNode.getTreeMaker(), source, onMethod, onParam);
 		injectMethod(fieldNode.up(), createdWither);
 	}
 	
-	private JCMethodDecl createWither(long access, JavacNode field, JavacTreeMaker maker, JCTree source, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
+	public JCMethodDecl createWither(long access, JavacNode field, JavacTreeMaker maker, JavacNode source, List<JCAnnotation> onMethod, List<JCAnnotation> onParam) {
 		String witherName = toWitherName(field);
 		if (witherName == null) return null;
 		
 		JCVariableDecl fieldDecl = (JCVariableDecl) field.get();
 		
 		ListBuffer<JCStatement> statements = new ListBuffer<JCStatement>();
-		List<JCAnnotation> nonNulls = findAnnotations(field, TransformationsUtil.NON_NULL_PATTERN);
-		List<JCAnnotation> nullables = findAnnotations(field, TransformationsUtil.NULLABLE_PATTERN);
+		List<JCAnnotation> nonNulls = findAnnotations(field, NON_NULL_PATTERN);
+		List<JCAnnotation> nullables = findAnnotations(field, NULLABLE_PATTERN);
 		
 		Name methodName = field.toName(witherName);
 		List<JCAnnotation> annsOnParam = copyAnnotations(onParam).appendList(nonNulls).appendList(nullables);
 		
-		long flags = JavacHandlerUtil.addFinalIfNeeded(0L, field.getContext());
+		long flags = JavacHandlerUtil.addFinalIfNeeded(Flags.PARAMETER, field.getContext());
 		JCVariableDecl param = maker.VarDef(maker.Modifiers(flags, annsOnParam), fieldDecl.name, fieldDecl.vartype, null);
 		
 		JCExpression selfType = cloneSelfType(field);
@@ -246,7 +248,7 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 		if (nonNulls.isEmpty()) {
 			statements.append(returnStatement);
 		} else {
-			JCStatement nullCheck = generateNullCheck(maker, field);
+			JCStatement nullCheck = generateNullCheck(maker, field, source);
 			if (nullCheck != null) statements.append(nullCheck);
 			statements.append(returnStatement);
 		}
@@ -265,7 +267,7 @@ public class HandleWither extends JavacAnnotationHandler<Wither> {
 			annsOnMethod = annsOnMethod.prepend(maker.Annotation(genJavaLangTypeRef(field, "Deprecated"), List.<JCExpression>nil()));
 		}
 		JCMethodDecl decl = recursiveSetGeneratedBy(maker.MethodDef(maker.Modifiers(access, annsOnMethod), methodName, returnType,
-				methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source, field.getContext());
+				methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source.get(), field.getContext());
 		copyJavadoc(field, decl, CopyJavadoc.WITHER);
 		return decl;
 	}

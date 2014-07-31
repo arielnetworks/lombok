@@ -161,48 +161,45 @@ public class Processor extends AbstractProcessor {
 		}
 	}
 	
-	private static class WrappingClassLoader extends ClassLoader {
-		private final ClassLoader parent;
-		
-		public WrappingClassLoader(ClassLoader parent) {
-			this.parent = parent;
-		}
-		
-		public Class<?> loadClass(String name) throws ClassNotFoundException {
-			return parent.loadClass(name);
-		}
-		
-		public String toString() {
-			return parent.toString();
-		}
-		
-		public URL getResource(String name) {
-			return parent.getResource(name);
-		}
-		
-		public Enumeration<URL> getResources(String name) throws IOException {
-			return parent.getResources(name);
-		}
-		
-		public InputStream getResourceAsStream(String name) {
-			return parent.getResourceAsStream(name);
-		}
-		
-		public void setDefaultAssertionStatus(boolean enabled) {
-			parent.setDefaultAssertionStatus(enabled);
-		}
-		
-		public void setPackageAssertionStatus(String packageName, boolean enabled) {
-			parent.setPackageAssertionStatus(packageName, enabled);
-		}
-		
-		public void setClassAssertionStatus(String className, boolean enabled) {
-			parent.setClassAssertionStatus(className, enabled);
-		}
-		
-		public void clearAssertionStatus() {
-			parent.clearAssertionStatus();
-		}
+	private static ClassLoader wrapClassLoader(final ClassLoader parent) {
+		return new ClassLoader() {
+			
+			public Class<?> loadClass(String name) throws ClassNotFoundException {
+				return parent.loadClass(name);
+			}
+			
+			public String toString() {
+				return parent.toString();
+			}
+			
+			public URL getResource(String name) {
+				return parent.getResource(name);
+			}
+			
+			public Enumeration<URL> getResources(String name) throws IOException {
+				return parent.getResources(name);
+			}
+			
+			public InputStream getResourceAsStream(String name) {
+				return parent.getResourceAsStream(name);
+			}
+			
+			public void setDefaultAssertionStatus(boolean enabled) {
+				parent.setDefaultAssertionStatus(enabled);
+			}
+			
+			public void setPackageAssertionStatus(String packageName, boolean enabled) {
+				parent.setPackageAssertionStatus(packageName, enabled);
+			}
+			
+			public void setClassAssertionStatus(String className, boolean enabled) {
+				parent.setClassAssertionStatus(className, enabled);
+			}
+			
+			public void clearAssertionStatus() {
+				parent.clearAssertionStatus();
+			}
+		};
 	}
 	
 	private void stopJavacProcessingEnvironmentFromClosingOurClassloader() {
@@ -211,7 +208,7 @@ public class Processor extends AbstractProcessor {
 			f.setAccessible(true);
 			ClassLoader unwrapped = (ClassLoader) f.get(processingEnv);
 			if (unwrapped == null) return;
-			ClassLoader wrapped = new WrappingClassLoader(unwrapped);
+			ClassLoader wrapped = wrapClassLoader(unwrapped);
 			f.set(processingEnv, wrapped);
 		} catch (NoSuchFieldException e) {
 			// Some versions of javac have this (and call close on it), some don't. I guess this one doesn't have it.
@@ -259,11 +256,15 @@ public class Processor extends AbstractProcessor {
 			for (int i = priorityLevels.length - 1; i >= 0; i--) {
 				Long curLevel = priorityLevels[i];
 				Long nextLevel = (i == priorityLevels.length - 1) ? null : priorityLevels[i + 1];
+				List<JCCompilationUnit> cusToAdvance = new ArrayList<JCCompilationUnit>();
 				for (Map.Entry<JCCompilationUnit, Long> entry : roots.entrySet()) {
 					if (curLevel.equals(entry.getValue())) {
-						entry.setValue(nextLevel);
+						cusToAdvance.add(entry.getKey());
 						newLevels.add(nextLevel);
 					}
+				}
+				for (JCCompilationUnit unit : cusToAdvance) {
+					roots.put(unit, nextLevel);
 				}
 			}
 			newLevels.remove(null);

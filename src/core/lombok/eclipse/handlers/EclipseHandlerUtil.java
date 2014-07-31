@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2013 The Project Lombok Authors.
+ * Copyright (C) 2009-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,11 @@
  */
 package lombok.eclipse.handlers;
 
+import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.eclipse.Eclipse.*;
-import static lombok.core.TransformationsUtil.*;
+import static lombok.eclipse.EclipseAugments.*;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -35,25 +35,24 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.WeakHashMap;
 
 import lombok.AccessLevel;
+import lombok.ConfigurationKeys;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Lombok;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
 import lombok.core.AnnotationValues.AnnotationValue;
-import lombok.core.TransformationsUtil;
 import lombok.core.TypeResolver;
+import lombok.core.configuration.NullCheckExceptionType;
+import lombok.core.debug.ProblemReporter;
+import lombok.core.handlers.HandlerUtil;
 import lombok.eclipse.EclipseAST;
 import lombok.eclipse.EclipseNode;
 import lombok.experimental.Accessors;
+import lombok.experimental.Tolerate;
 
-import org.eclipse.core.runtime.ILog;
-import org.eclipse.core.runtime.IStatus;
-import org.eclipse.core.runtime.Platform;
-import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.AbstractVariableDeclaration;
@@ -104,7 +103,6 @@ import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
 import org.eclipse.jdt.internal.compiler.lookup.TypeIds;
 import org.eclipse.jdt.internal.compiler.lookup.WildcardBinding;
-import org.osgi.framework.Bundle;
 
 /**
  * Container for static utility methods useful to handlers written for eclipse.
@@ -114,36 +112,16 @@ public class EclipseHandlerUtil {
 		//Prevent instantiation
 	}
 	
-	private static final String DEFAULT_BUNDLE = "org.eclipse.jdt.core";
-	
 	/**
 	 * Generates an error in the Eclipse error log. Note that most people never look at it!
 	 * 
 	 * @param cud The {@code CompilationUnitDeclaration} where the error occurred.
 	 *     An error will be generated on line 0 linking to the error log entry. Can be {@code null}.
 	 * @param message Human readable description of the problem.
-	 * @param error The associated exception. Can be {@code null}.
+	 * @param ex The associated exception. Can be {@code null}.
 	 */
-	public static void error(CompilationUnitDeclaration cud, String message, Throwable error) {
-		error(cud, message, null, error);
-	}
-	
-	/**
-	 * Generates an error in the Eclipse error log. Note that most people never look at it!
-	 * 
-	 * @param cud The {@code CompilationUnitDeclaration} where the error occurred.
-	 *     An error will be generated on line 0 linking to the error log entry. Can be {@code null}.
-	 * @param message Human readable description of the problem.
-	 * @param bundleName Can be {@code null} to default to {@code org.eclipse.jdt.core} which is usually right.
-	 * @param error The associated exception. Can be {@code null}.
-	 */
-	public static void error(CompilationUnitDeclaration cud, String message, String bundleName, Throwable error) {
-		if (bundleName == null) bundleName = DEFAULT_BUNDLE;
-		try {
-			new EclipseWorkspaceLogger().error(message, bundleName, error);
-		} catch (NoClassDefFoundError e) {  //standalone ecj does not jave Platform, ILog, IStatus, and friends.
-			new TerminalLogger().error(message, bundleName, error);
-		}
+	public static void error(CompilationUnitDeclaration cud, String message, Throwable ex) {
+		ProblemReporter.error(message, ex);
 		if (cud != null) EclipseAST.addProblemToCompilationResult(cud.getFileName(), cud.compilationResult, false, message + " - See error log.", 0, 0);
 	}
 	
@@ -151,83 +129,14 @@ public class EclipseHandlerUtil {
 	 * Generates a warning in the Eclipse error log. Note that most people never look at it!
 	 * 
 	 * @param message Human readable description of the problem.
-	 * @param error The associated exception. Can be {@code null}.
+	 * @param ex The associated exception. Can be {@code null}.
 	 */
-	public static void warning(String message, Throwable error) {
-		warning(message, null, error);
+	public static void warning(String message, Throwable ex) {
+		ProblemReporter.warning(message, ex);
 	}
-	
-	/**
-	 * Generates a warning in the Eclipse error log. Note that most people never look at it!
-	 * 
-	 * @param message Human readable description of the problem.
-	 * @param bundleName Can be {@code null} to default to {@code org.eclipse.jdt.core} which is usually right.
-	 * @param error The associated exception. Can be {@code null}.
-	 */
-	public static void warning(String message, String bundleName, Throwable error) {
-		if (bundleName == null) bundleName = DEFAULT_BUNDLE;
-		try {
-			new EclipseWorkspaceLogger().warning(message, bundleName, error);
-		} catch (NoClassDefFoundError e) {  //standalone ecj does not jave Platform, ILog, IStatus, and friends.
-			new TerminalLogger().warning(message, bundleName, error);
-		}
-	}
-	
-	private static class TerminalLogger {
-		void error(String message, String bundleName, Throwable error) {
-			System.err.println(message);
-			if (error != null) error.printStackTrace();
-		}
-		
-		void warning(String message, String bundleName, Throwable error) {
-			System.err.println(message);
-			if (error != null) error.printStackTrace();
-		}
-	}
-	
-	private static class EclipseWorkspaceLogger {
-		void error(String message, String bundleName, Throwable error) {
-			msg(IStatus.ERROR, message, bundleName, error);
-		}
-		
-		void warning(String message, String bundleName, Throwable error) {
-			msg(IStatus.WARNING, message, bundleName, error);
-		}
-		
-		private void msg(int msgType, String message, String bundleName, Throwable error) {
-			Bundle bundle = Platform.getBundle(bundleName);
-			if (bundle == null) {
-				System.err.printf("Can't find bundle %s while trying to report error:\n%s\n", bundleName, message);
-				return;
-			}
-			
-			ILog log = Platform.getLog(bundle);
-			
-			log.log(new Status(msgType, bundleName, message, error));
-		}
-	}
-	
-	private static Field generatedByField;
-	
-	static {
-		try {
-			generatedByField = ASTNode.class.getDeclaredField("$generatedBy");
-		} catch (Throwable t) {
-			//ignore - no $generatedBy exists when running in ecj.
-		}
-	}
-	
-	private static Map<ASTNode, ASTNode> generatedNodes = new WeakHashMap<ASTNode, ASTNode>();
 	
 	public static ASTNode getGeneratedBy(ASTNode node) {
-		if (generatedByField != null) {
-			try {
-				return (ASTNode) generatedByField.get(node);
-			} catch (Exception e) {}
-		}
-		synchronized (generatedNodes) {
-			return generatedNodes.get(node);
-		}
+		return ASTNode_generatedBy.get(node);
 	}
 	
 	public static boolean isGenerated(ASTNode node) {
@@ -235,15 +144,7 @@ public class EclipseHandlerUtil {
 	}
 	
 	public static ASTNode setGeneratedBy(ASTNode node, ASTNode source) {
-		if (generatedByField != null) {
-			try {
-				generatedByField.set(node, source);
-				return node;
-			} catch (Exception e) {}
-		}
-		synchronized (generatedNodes) {
-			generatedNodes.put(node, source);
-		}
+		ASTNode_generatedBy.set(node, source);
 		return node;
 	}
 	
@@ -435,21 +336,21 @@ public class EclipseHandlerUtil {
 					}
 				}
 			}
-			TypeReference typeRef = new ParameterizedQualifiedTypeReference(iRef.tokens, args, iRef.dimensions(), iRef.sourcePositions);
+			TypeReference typeRef = new ParameterizedQualifiedTypeReference(iRef.tokens, args, iRef.dimensions(), copy(iRef.sourcePositions));
 			setGeneratedBy(typeRef, source);
 			return typeRef;
 		}
 		
 		if (ref instanceof ArrayQualifiedTypeReference) {
 			ArrayQualifiedTypeReference iRef = (ArrayQualifiedTypeReference) ref;
-			TypeReference typeRef = new ArrayQualifiedTypeReference(iRef.tokens, iRef.dimensions(), iRef.sourcePositions);
+			TypeReference typeRef = new ArrayQualifiedTypeReference(iRef.tokens, iRef.dimensions(), copy(iRef.sourcePositions));
 			setGeneratedBy(typeRef, source);
 			return typeRef;
 		}
 		
 		if (ref instanceof QualifiedTypeReference) {
 			QualifiedTypeReference iRef = (QualifiedTypeReference) ref;
-			TypeReference typeRef = new QualifiedTypeReference(iRef.tokens, iRef.sourcePositions);
+			TypeReference typeRef = new QualifiedTypeReference(iRef.tokens, copy(iRef.sourcePositions));
 			setGeneratedBy(typeRef, source);
 			return typeRef;
 		}
@@ -874,12 +775,9 @@ public class EclipseHandlerUtil {
 		}
 	}
 	
-	private static final Map<FieldDeclaration, Object> generatedLazyGettersWithPrimitiveBoolean = new WeakHashMap<FieldDeclaration, Object>();
-	private static final Object MARKER = new Object();
-	
 	static void registerCreatedLazyGetter(FieldDeclaration field, char[] methodName, TypeReference returnType) {
 		if (isBoolean(returnType)) {
-			generatedLazyGettersWithPrimitiveBoolean.put(field, MARKER);
+			FieldDeclaration_booleanLazyGetter.set(field, true);
 		}
 	}
 	
@@ -889,7 +787,7 @@ public class EclipseHandlerUtil {
 	
 	private static GetterMethod findGetter(EclipseNode field) {
 		FieldDeclaration fieldDeclaration = (FieldDeclaration) field.get();
-		boolean forceBool = generatedLazyGettersWithPrimitiveBoolean.containsKey(fieldDeclaration);
+		boolean forceBool = FieldDeclaration_booleanLazyGetter.get(fieldDeclaration);
 		TypeReference fieldType = fieldDeclaration.type;
 		boolean isBoolean = forceBool || isBoolean(fieldType);
 		
@@ -1052,7 +950,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllGetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static List<String> toAllGetterNames(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toAllGetterNames(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toAllGetterNames(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1061,7 +959,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toGetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toGetterName(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toGetterName(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toGetterName(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1069,7 +967,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllSetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllSetterNames(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toAllSetterNames(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toAllSetterNames(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1078,7 +976,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toSetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toSetterName(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toSetterName(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toSetterName(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1086,7 +984,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllWitherNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllWitherNames(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toAllWitherNames(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toAllWitherNames(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1095,19 +993,17 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toWitherName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toWitherName(EclipseNode field, boolean isBoolean) {
-		return TransformationsUtil.toWitherName(getAccessorsForField(field), field.getName(), isBoolean);
+		return HandlerUtil.toWitherName(field.getAst(), getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
 	 * When generating a setter, the setter either returns void (beanspec) or Self (fluent).
-	 * This method scans for the {@code Accessors} annotation to figure that out.
+	 * This method scans for the {@code Accessors} annotation and associated config properties to figure that out.
 	 */
 	public static boolean shouldReturnThis(EclipseNode field) {
 		if ((((FieldDeclaration) field.get()).modifiers & ClassFileConstants.AccStatic) != 0) return false;
 		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		boolean forced = (accessors.getActualExpression("chain") != null);
-		Accessors instance = accessors.getInstance();
-		return instance.chain() || (instance.fluent() && !forced);
+		return shouldReturnThis0(accessors, field.getAst());
 	}
 	
 	/**
@@ -1135,10 +1031,11 @@ public class EclipseHandlerUtil {
 	}
 	
 	public static char[] removePrefixFromField(EclipseNode field) {
-		String[] prefixes = null;
+		List<String> prefixes = null;
 		for (EclipseNode node : field.down()) {
 			if (annotationTypeMatches(Accessors.class, node)) {
-				prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+				AnnotationValues<Accessors> ann = createAnnotation(Accessors.class, node);
+				if (ann.isExplicit("prefix")) prefixes = Arrays.asList(ann.getInstance().prefix());
 				break;
 			}
 		}
@@ -1149,7 +1046,8 @@ public class EclipseHandlerUtil {
 			while (current != null) {
 				for (EclipseNode node : current.down()) {
 					if (annotationTypeMatches(Accessors.class, node)) {
-						prefixes = createAnnotation(Accessors.class, node).getInstance().prefix();
+						AnnotationValues<Accessors> ann = createAnnotation(Accessors.class, node);
+						if (ann.isExplicit("prefix")) prefixes = Arrays.asList(ann.getInstance().prefix());
 						break outer;
 					}
 				}
@@ -1157,8 +1055,9 @@ public class EclipseHandlerUtil {
 			}
 		}
 		
-		if (prefixes != null && prefixes.length > 0) {
-			CharSequence newName = TransformationsUtil.removePrefix(field.getName(), prefixes);
+		if (prefixes == null) prefixes = field.getAst().readConfiguration(ConfigurationKeys.ACCESSORS_PREFIX);
+		if (!prefixes.isEmpty()) {
+			CharSequence newName = removePrefix(field.getName(), prefixes);
 			if (newName != null) return newName.toString().toCharArray();
 		}
 		
@@ -1233,7 +1132,7 @@ public class EclipseHandlerUtil {
 		
 		if (node != null && node.get() instanceof TypeDeclaration) {
 			TypeDeclaration typeDecl = (TypeDeclaration)node.get();
-			if (typeDecl.methods != null) for (AbstractMethodDeclaration def : typeDecl.methods) {
+			if (typeDecl.methods != null) top: for (AbstractMethodDeclaration def : typeDecl.methods) {
 				if (def instanceof MethodDeclaration) {
 					char[] mName = def.selector;
 					if (mName == null) continue;
@@ -1254,6 +1153,11 @@ public class EclipseHandlerUtil {
 							
 							if (params < minArgs || params > maxArgs) continue;
 						}
+						
+						if (def.annotations != null) for (Annotation anno : def.annotations) {
+							if (typeMatches(Tolerate.class, node, anno.type)) continue top;
+						}
+						
 						return getGeneratedBy(def) == null ? MemberExistsResult.EXISTS_BY_USER : MemberExistsResult.EXISTS_BY_LOMBOK;
 					}
 				}
@@ -1276,9 +1180,14 @@ public class EclipseHandlerUtil {
 		
 		if (node != null && node.get() instanceof TypeDeclaration) {
 			TypeDeclaration typeDecl = (TypeDeclaration)node.get();
-			if (typeDecl.methods != null) for (AbstractMethodDeclaration def : typeDecl.methods) {
+			if (typeDecl.methods != null) top: for (AbstractMethodDeclaration def : typeDecl.methods) {
 				if (def instanceof ConstructorDeclaration) {
 					if ((def.bits & ASTNode.IsDefaultConstructor) != 0) continue;
+					
+					if (def.annotations != null) for (Annotation anno : def.annotations) {
+						if (typeMatches(Tolerate.class, node, anno.type)) continue top;
+					}
+					
 					return getGeneratedBy(def) == null ? MemberExistsResult.EXISTS_BY_USER : MemberExistsResult.EXISTS_BY_LOMBOK;
 				}
 			}
@@ -1329,7 +1238,7 @@ public class EclipseHandlerUtil {
 		return type.add(field, Kind.FIELD);
 	}
 	
-	private static boolean isEnumConstant(final FieldDeclaration field) {
+	public static boolean isEnumConstant(final FieldDeclaration field) {
 		return ((field.initialization instanceof AllocationExpression) && (((AllocationExpression) field.initialization).enumConstant == field));
 	}
 	
@@ -1397,6 +1306,19 @@ public class EclipseHandlerUtil {
 	private static final char[] ALL = "all".toCharArray();
 	
 	public static Annotation[] createSuppressWarningsAll(ASTNode source, Annotation[] originalAnnotationArray) {
+		if (originalAnnotationArray != null) for (Annotation ann : originalAnnotationArray) {
+			char[] lastToken = null;
+			
+			if (ann.type instanceof QualifiedTypeReference) {
+				char[][] t = ((QualifiedTypeReference) ann.type).tokens;
+				lastToken = t[t.length - 1];
+			} else if (ann.type instanceof SingleTypeReference) {
+				lastToken = ((SingleTypeReference) ann.type).token;
+			}
+			
+			if (lastToken != null && new String(lastToken).equals("SuppressWarnings")) return originalAnnotationArray;
+		}
+		
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
 		long[] poss = new long[3];
@@ -1416,19 +1338,33 @@ public class EclipseHandlerUtil {
 	}
 	
 	/**
-	 * Generates a new statement that checks if the given variable is null, and if so, throws a {@code NullPointerException} with the
+	 * Generates a new statement that checks if the given variable is null, and if so, throws a specified exception with the
 	 * variable name as message.
+	 * 
+	 * @param exName The name of the exception to throw; normally {@code java.lang.NullPointerException}.
 	 */
-	public static Statement generateNullCheck(AbstractVariableDeclaration variable, ASTNode source) {
+	public static Statement generateNullCheck(AbstractVariableDeclaration variable, EclipseNode sourceNode) {
+		NullCheckExceptionType exceptionType = sourceNode.getAst().readConfiguration(ConfigurationKeys.NON_NULL_EXCEPTION_TYPE);
+		if (exceptionType == null) exceptionType = NullCheckExceptionType.NULL_POINTER_EXCEPTION;
+		
+		ASTNode source = sourceNode.get();
+		
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
 		
 		if (isPrimitive(variable.type)) return null;
 		AllocationExpression exception = new AllocationExpression();
 		setGeneratedBy(exception, source);
-		exception.type = new QualifiedTypeReference(fromQualifiedName("java.lang.NullPointerException"), new long[]{p, p, p});
+		int partCount = 1;
+		String exceptionTypeStr = exceptionType.getExceptionType();
+		for (int i = 0; i < exceptionTypeStr.length(); i++) if (exceptionTypeStr.charAt(i) == '.') partCount++;
+		long[] ps = new long[partCount];
+		Arrays.fill(ps, 0L);
+		exception.type = new QualifiedTypeReference(fromQualifiedName(exceptionTypeStr), ps);
 		setGeneratedBy(exception.type, source);
-		exception.arguments = new Expression[] { new StringLiteral(variable.name, pS, pE, 0)};
+		exception.arguments = new Expression[] {
+				new StringLiteral(exceptionType.toExceptionMessage(new String(variable.name)).toCharArray(), pS, pE, 0)
+		};
 		setGeneratedBy(exception.arguments[0], source);
 		ThrowStatement throwStatement = new ThrowStatement(exception, pS, pE);
 		setGeneratedBy(throwStatement, source);
@@ -1515,7 +1451,7 @@ public class EclipseHandlerUtil {
 				} else if (castTo.getClass() == QualifiedTypeReference.class) {
 					QualifiedTypeReference qtr = (QualifiedTypeReference) castTo;
 					//Same here, but for the more complex types, they stay types.
-					castToConverted = new QualifiedNameReference(qtr.tokens, qtr.sourcePositions, qtr.sourceStart, qtr.sourceEnd);
+					castToConverted = new QualifiedNameReference(qtr.tokens, copy(qtr.sourcePositions), qtr.sourceStart, qtr.sourceEnd);
 					castToConverted.bits = (castToConverted.bits & ~Binding.VARIABLE) | Binding.TYPE;
 					setGeneratedBy(castToConverted, source);
 				}
@@ -1608,7 +1544,7 @@ public class EclipseHandlerUtil {
 		return true;
 	}
 	
-	static List<Annotation> unboxAndRemoveAnnotationParameter(Annotation annotation, String annotationName, String errorName, EclipseNode errorNode) {
+	public static List<Annotation> unboxAndRemoveAnnotationParameter(Annotation annotation, String annotationName, String errorName, EclipseNode errorNode) {
 		if ("value".equals(annotationName)) {
 			// We can't unbox this, because SingleMemberAnnotation REQUIRES a value, and this method
 			// is supposed to remove the value. That means we need to replace the SMA with either
@@ -1700,7 +1636,7 @@ public class EclipseHandlerUtil {
 		return Collections.emptyList();
 	}
 	
-	static NameReference createNameReference(String name, Annotation source) {
+	public static NameReference createNameReference(String name, Annotation source) {
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
 		
@@ -1713,5 +1649,9 @@ public class EclipseHandlerUtil {
 		
 		setGeneratedBy(nameReference, source);
 		return nameReference;
+	}
+	
+	private static long[] copy(long[] array) {
+		return array == null ? null : array.clone();
 	}
 }

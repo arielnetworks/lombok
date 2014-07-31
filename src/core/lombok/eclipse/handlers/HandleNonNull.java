@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 The Project Lombok Authors.
+ * Copyright (C) 2013-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,13 @@
  */
 package lombok.eclipse.handlers;
 
+import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.eclipse.Eclipse.isPrimitive;
 import static lombok.eclipse.handlers.EclipseHandlerUtil.*;
 
 import java.util.Arrays;
 
+import lombok.ConfigurationKeys;
 import lombok.NonNull;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
@@ -57,6 +59,8 @@ import org.mangosdk.spi.ProviderFor;
 @HandlerPriority(value = 512) // 2^9; onParameter=@__(@NonNull) has to run first.
 public class HandleNonNull extends EclipseAnnotationHandler<NonNull> {
 	@Override public void handle(AnnotationValues<NonNull> annotation, Annotation ast, EclipseNode annotationNode) {
+		handleFlagUsage(annotationNode, ConfigurationKeys.NON_NULL_FLAG_USAGE, "@NonNull");
+		
 		if (annotationNode.up().getKind() == Kind.FIELD) {
 			// This is meaningless unless the field is used to generate a method (@Setter, @RequiredArgsConstructor, etc),
 			// but in that case those handlers will take care of it. However, we DO check if the annotation is applied to
@@ -95,7 +99,7 @@ public class HandleNonNull extends EclipseAnnotationHandler<NonNull> {
 		// and if they exist, create a new method in the class: 'private static <T> T lombok$nullCheck(T expr, String msg) {if (expr == null) throw NPE; return expr;}' and
 		// wrap all references to it in the super/this to a call to this method.
 		
-		Statement nullCheck = generateNullCheck(arg, ast);
+		Statement nullCheck = generateNullCheck(arg, annotationNode);
 		
 		if (nullCheck == null) {
 			// @NonNull applied to a primitive. Kinda pointless. Let's generate a warning.
@@ -142,11 +146,11 @@ public class HandleNonNull extends EclipseAnnotationHandler<NonNull> {
 		annotationNode.up().up().rebuild();
 	}
 	
-	private boolean isNullCheck(Statement stat) {
+	public boolean isNullCheck(Statement stat) {
 		return returnVarNameIfNullCheck(stat) != null;
 	}
 	
-	private char[] returnVarNameIfNullCheck(Statement stat) {
+	public char[] returnVarNameIfNullCheck(Statement stat) {
 		if (!(stat instanceof IfStatement)) return null;
 		
 		/* Check that the if's statement is a throw statement, possibly in a block. */ {

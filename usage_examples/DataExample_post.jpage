@@ -42,6 +42,10 @@ public class DataExample {
 		return "DataExample(" + this.getName() + ", " + this.getAge() + ", " + this.getScore() + ", " + Arrays.deepToString(this.getTags()) + ")";
 	}
 	
+	protected boolean canEqual(Object other) {
+		return other instanceof DataExample;
+	}
+	
 	@Override public boolean equals(Object o) {
 		if (o == this) return true;
 		if (!(o instanceof DataExample)) return false;
@@ -55,7 +59,7 @@ public class DataExample {
 	}
 	
 	@Override public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		final long temp1 = Double.doubleToLongBits(this.getScore());
 		result = (result*PRIME) + (this.getName() == null ? 0 : this.getName().hashCode());
@@ -90,6 +94,10 @@ public class DataExample {
 			return "Exercise(name=" + this.getName() + ", value=" + this.getValue() + ")";
 		}
 		
+		protected boolean canEqual(Object other) {
+			return other instanceof Exercise;
+		}
+		
 		@Override public boolean equals(Object o) {
 			if (o == this) return true;
 			if (!(o instanceof Exercise)) return false;
@@ -101,7 +109,7 @@ public class DataExample {
 		}
 		
 		@Override public int hashCode() {
-			final int PRIME = 31;
+			final int PRIME = 59;
 			int result = 1;
 			result = (result*PRIME) + (this.getName() == null ? 0 : this.getName().hashCode());
 			result = (result*PRIME) + (this.getValue() == null ? 0 : this.getValue().hashCode());

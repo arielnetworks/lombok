@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 The Project Lombok Authors.
+ * Copyright (C) 2013-2014 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,9 @@
  */
 package lombok.javac.java7;
 
+import static lombok.javac.CommentCatcher.JCCompilationUnit_comments;
+
 import java.util.List;
-import java.util.Map;
 
 import lombok.javac.CommentInfo;
 
@@ -32,21 +33,19 @@ import com.sun.tools.javac.parser.ParserFactory;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 
 class CommentCollectingParser extends EndPosParser {
-	private final Map<JCCompilationUnit, List<CommentInfo>> commentsMap;
 	private final Lexer lexer;
 	
 	protected CommentCollectingParser(ParserFactory fac, Lexer S,
-			boolean keepDocComments, boolean keepLineMap, Map<JCCompilationUnit, List<CommentInfo>> commentsMap) {
+			boolean keepDocComments, boolean keepLineMap) {
 		super(fac, S, keepDocComments, keepLineMap);
 		lexer = S;
-		this.commentsMap = commentsMap;
 	}
 	
 	public JCCompilationUnit parseCompilationUnit() {
 		JCCompilationUnit result = super.parseCompilationUnit();
 		if (lexer instanceof CommentCollectingScanner) {
 			List<CommentInfo> comments = ((CommentCollectingScanner)lexer).getComments();
-			commentsMap.put(result, comments);
+			JCCompilationUnit_comments.set(result, comments);
 		}
 		return result;
 	}

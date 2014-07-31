@@ -32,11 +32,11 @@ class DataOnLocalClass1 {
             return false;
         return true;
       }
-      public @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
+      protected @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
         return (other instanceof Local);
       }
       public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-        final int PRIME = 31;
+        final int PRIME = 59;
         int result = 1;
         result = ((result * PRIME) + this.getX());
         final java.lang.Object $name = this.getName();
@@ -82,11 +82,11 @@ class DataOnLocalClass2 {
               return false;
           return true;
         }
-        public @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
+        protected @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
           return (other instanceof Local.InnerLocal);
         }
         public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-          final int PRIME = 31;
+          final int PRIME = 59;
           int result = 1;
           final java.lang.Object $name = this.getName();
           result = ((result * PRIME) + (($name == null) ? 0 : $name.hashCode()));
@@ -120,11 +120,11 @@ class DataOnLocalClass2 {
             return false;
         return true;
       }
-      public @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
+      protected @java.lang.SuppressWarnings("all") boolean canEqual(final java.lang.Object other) {
         return (other instanceof Local);
       }
       public @java.lang.Override @java.lang.SuppressWarnings("all") int hashCode() {
-        final int PRIME = 31;
+        final int PRIME = 59;
         int result = 1;
         result = ((result * PRIME) + this.getX());
         return result;

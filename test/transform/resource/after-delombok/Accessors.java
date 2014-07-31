@@ -78,13 +78,13 @@ class AccessorsPrefix3 {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
-	public boolean canEqual(final java.lang.Object other) {
+	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof AccessorsPrefix3;
 	}
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
 	public int hashCode() {
-		final int PRIME = 31;
+		final int PRIME = 59;
 		int result = 1;
 		final java.lang.Object $fName = this.getName();
 		result = result * PRIME + ($fName == null ? 0 : $fName.hashCode());
