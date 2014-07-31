@@ -43,7 +43,7 @@ public class Version {
 		if (args.length > 0) {
 			System.out.printf("Lombok %s\n", getFullVersion());
 		} else {
-			System.out.println(VERSION);
+			System.out.println(getVersion());
 		}
 	}
 	
@@ -51,7 +51,7 @@ public class Version {
 	 * Get the current Lombok version.
 	 */
 	public static String getVersion() {
-		return VERSION;
+		return VERSION + "-issue358-workaround";
 	}
 	
 	/**
@@ -66,6 +66,6 @@ public class Version {
 	}
 	
 	public static String getFullVersion() {
-		return String.format("v%s \"%s\"", VERSION, RELEASE_NAME);
+		return String.format("v%s \"%s\"", getVersion(), RELEASE_NAME);
 	}
 }
