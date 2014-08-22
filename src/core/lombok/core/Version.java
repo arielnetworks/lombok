@@ -53,7 +53,7 @@ public class Version {
 	 * Get the current Lombok version.
 	 */
 	public static String getVersion() {
-		return VERSION + "-issue358-workaround";
+		return VERSION + "-issue358-workaround-edge";
 	}
 	
 	/**
