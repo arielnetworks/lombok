@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 The Project Lombok Authors.
+ * Copyright (C) 2009-2015 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,13 @@
  */
 package lombok.javac.handlers;
 
+import static com.sun.tools.javac.code.Flags.GENERATEDCONSTR;
 import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.javac.Javac.*;
 import static lombok.javac.JavacAugments.JCTree_generatedNode;
 
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -41,6 +43,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
+import lombok.core.LombokImmutableList;
 import lombok.core.AnnotationValues.AnnotationValue;
 import lombok.core.TypeResolver;
 import lombok.core.configuration.NullCheckExceptionType;
@@ -54,6 +57,9 @@ import lombok.javac.JavacTreeMaker;
 
 import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.code.Scope;
+import com.sun.tools.javac.code.Symbol;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.parser.Tokens.Comment;
 import com.sun.tools.javac.tree.DocCommentTable;
 import com.sun.tools.javac.tree.JCTree;
@@ -68,7 +74,6 @@ import com.sun.tools.javac.tree.JCTree.JCExpressionStatement;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.tree.JCTree.JCImport;
-import com.sun.tools.javac.tree.JCTree.JCLiteral;
 import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import com.sun.tools.javac.tree.JCTree.JCModifiers;
@@ -242,56 +247,65 @@ public class JavacHandlerUtil {
 		Map<String, AnnotationValue> values = new HashMap<String, AnnotationValue>();
 		JCAnnotation anno = (JCAnnotation) node.get();
 		List<JCExpression> arguments = anno.getArguments();
-		for (Method m : type.getDeclaredMethods()) {
-			if (!Modifier.isPublic(m.getModifiers())) continue;
-			String name = m.getName();
+		
+		for (JCExpression arg : arguments) {
+			String mName;
+			JCExpression rhs;
 			java.util.List<String> raws = new ArrayList<String>();
 			java.util.List<Object> guesses = new ArrayList<Object>();
 			java.util.List<Object> expressions = new ArrayList<Object>();
 			final java.util.List<DiagnosticPosition> positions = new ArrayList<DiagnosticPosition>();
-			boolean isExplicit = false;
 			
-			for (JCExpression arg : arguments) {
-				String mName;
-				JCExpression rhs;
-				
-				if (arg instanceof JCAssign) {
-					JCAssign assign = (JCAssign) arg;
-					mName = assign.lhs.toString();
-					rhs = assign.rhs;
-				} else {
-					rhs = arg;
-					mName = "value";
-				}
-				
-				if (!mName.equals(name)) continue;
-				isExplicit = true;
-				if (rhs instanceof JCNewArray) {
-					List<JCExpression> elems = ((JCNewArray)rhs).elems;
-					for (JCExpression inner : elems) {
-						raws.add(inner.toString());
-						expressions.add(inner);
-						guesses.add(calculateGuess(inner));
-						positions.add(inner.pos());
-					}
-				} else {
-					raws.add(rhs.toString());
-					expressions.add(rhs);
-					guesses.add(calculateGuess(rhs));
-					positions.add(rhs.pos());
-				}
+			if (arg instanceof JCAssign) {
+				JCAssign assign = (JCAssign) arg;
+				mName = assign.lhs.toString();
+				rhs = assign.rhs;
+			} else {
+				rhs = arg;
+				mName = "value";
 			}
 			
-			values.put(name, new AnnotationValue(node, raws, expressions, guesses, isExplicit) {
+			if (rhs instanceof JCNewArray) {
+				List<JCExpression> elems = ((JCNewArray)rhs).elems;
+				for (JCExpression inner : elems) {
+					raws.add(inner.toString());
+					expressions.add(inner);
+					guesses.add(calculateGuess(inner));
+					positions.add(inner.pos());
+				}
+			} else {
+				raws.add(rhs.toString());
+				expressions.add(rhs);
+				guesses.add(calculateGuess(rhs));
+				positions.add(rhs.pos());
+			}
+			
+			values.put(mName, new AnnotationValue(node, raws, expressions, guesses, true) {
 				@Override public void setError(String message, int valueIdx) {
 					if (valueIdx < 0) node.addError(message);
 					else node.addError(message, positions.get(valueIdx));
 				}
+				
 				@Override public void setWarning(String message, int valueIdx) {
 					if (valueIdx < 0) node.addWarning(message);
 					else node.addWarning(message, positions.get(valueIdx));
 				}
 			});
+		}
+		
+		for (Method m : type.getDeclaredMethods()) {
+			if (!Modifier.isPublic(m.getModifiers())) continue;
+			String name = m.getName();
+			if (!values.containsKey(name)) {
+				values.put(name, new AnnotationValue(node, new ArrayList<String>(), new ArrayList<Object>(), new ArrayList<Object>(), false) {
+					@Override public void setError(String message, int valueIdx) {
+						node.addError(message);
+					}
+					@Override public void setWarning(String message, int valueIdx) {
+						node.addWarning(message);
+					}
+				});
+			}
 		}
 		
 		return new AnnotationValues<A>(type, values, node);
@@ -445,9 +459,9 @@ public class JavacHandlerUtil {
 		return HandlerUtil.shouldReturnThis0(accessors, field.getAst());
 	}
 	
-	public static JCExpression cloneSelfType(JavacNode field) {
-		JavacNode typeNode = field;
-		JavacTreeMaker maker = field.getTreeMaker();
+	public static JCExpression cloneSelfType(JavacNode childOfType) {
+		JavacNode typeNode = childOfType;
+		JavacTreeMaker maker = childOfType.getTreeMaker();
 		while (typeNode != null && typeNode.getKind() != Kind.TYPE) typeNode = typeNode.up();
 		if (typeNode != null && typeNode.get() instanceof JCClassDecl) {
 			JCClassDecl type = (JCClassDecl) typeNode.get();
@@ -808,8 +822,8 @@ public class JavacHandlerUtil {
 	 * The field carries the &#64;{@link SuppressWarnings}("all") annotation.
 	 * Also takes care of updating the JavacAST.
 	 */
-	public static void injectFieldSuppressWarnings(JavacNode typeNode, JCVariableDecl field) {
-		injectField(typeNode, field, true);
+	public static JavacNode injectFieldAndMarkGenerated(JavacNode typeNode, JCVariableDecl field) {
+		return injectField(typeNode, field, true);
 	}
 	
 	/**
@@ -821,21 +835,28 @@ public class JavacHandlerUtil {
 		return injectField(typeNode, field, false);
 	}
 
-	private static JavacNode injectField(JavacNode typeNode, JCVariableDecl field, boolean addSuppressWarnings) {
+	private static JavacNode injectField(JavacNode typeNode, JCVariableDecl field, boolean addGenerated) {
 		JCClassDecl type = (JCClassDecl) typeNode.get();
 		
-		if (addSuppressWarnings) addSuppressWarningsAll(field.mods, typeNode, field.pos, getGeneratedBy(field), typeNode.getContext());
+		if (addGenerated) {
+			addSuppressWarningsAll(field.mods, typeNode, field.pos, getGeneratedBy(field), typeNode.getContext());
+			addGenerated(field.mods, typeNode, field.pos, getGeneratedBy(field), typeNode.getContext());
+		}
 		
 		List<JCTree> insertAfter = null;
 		List<JCTree> insertBefore = type.defs;
-		while (insertBefore.tail != null) {
+		while (true) {
+			boolean skip = false;
 			if (insertBefore.head instanceof JCVariableDecl) {
 				JCVariableDecl f = (JCVariableDecl) insertBefore.head;
-				if (isEnumConstant(f) || isGenerated(f)) {
-					insertAfter = insertBefore;
-					insertBefore = insertBefore.tail;
-					continue;
-				}
+				if (isEnumConstant(f) || isGenerated(f)) skip = true;
+			} else if (insertBefore.head instanceof JCMethodDecl) {
+				if ((((JCMethodDecl) insertBefore.head).mods.flags & GENERATEDCONSTR) != 0) skip = true;
+			}
+			if (skip) {
+				insertAfter = insertBefore;
+				insertBefore = insertBefore.tail;
+				continue;
 			}
 			break;
 		}
@@ -852,6 +873,32 @@ public class JavacHandlerUtil {
 	
 	public static boolean isEnumConstant(final JCVariableDecl field) {
 		return (field.mods.flags & Flags.ENUM) != 0;
+	}
+	
+	// jdk9 support, types have changed, names stay the same
+	static class ClassSymbolMembersField {
+		private static final Field membersField;
+		private static final Method removeMethod;
+		
+		static {
+			Field f = null;
+			Method m = null;
+			try {
+				f = ClassSymbol.class.getField("members_field");
+				m = f.getType().getMethod("remove", Symbol.class);
+			} catch (Exception e) {}
+			membersField = f;
+			removeMethod = m;
+		}
+		
+		static void remove(ClassSymbol from, Symbol toRemove) {
+			if (from == null) return;
+			try {
+				Scope scope = (Scope) membersField.get(from);
+				if (scope == null) return;
+				removeMethod.invoke(scope, toRemove);
+			} catch (Exception e) {}
+		}
 	}
 	
 	/**
@@ -872,9 +919,7 @@ public class JavacHandlerUtil {
 						JavacNode tossMe = typeNode.getNodeFor(def);
 						if (tossMe != null) tossMe.up().removeChild(tossMe);
 						type.defs = addAllButOne(type.defs, idx);
-						if (type.sym != null && type.sym.members_field != null) {
-							 type.sym.members_field.remove(((JCMethodDecl)def).sym);
-						}
+						ClassSymbolMembersField.remove(type.sym, ((JCMethodDecl)def).sym);
 						break;
 					}
 				}
@@ -883,6 +928,7 @@ public class JavacHandlerUtil {
 		}
 		
 		addSuppressWarningsAll(method.mods, typeNode, method.pos, getGeneratedBy(method), typeNode.getContext());
+		addGenerated(method.mods, typeNode, method.pos, getGeneratedBy(method), typeNode.getContext());
 		type.defs = type.defs.append(method);
 		
 		typeNode.add(method, Kind.METHOD);
@@ -898,6 +944,7 @@ public class JavacHandlerUtil {
 	public static JavacNode injectType(JavacNode typeNode, final JCClassDecl type) {
 		JCClassDecl typeDecl = (JCClassDecl) typeNode.get();
 		addSuppressWarningsAll(type.mods, typeNode, type.pos, getGeneratedBy(type), typeNode.getContext());
+		addGenerated(type.mods, typeNode, type.pos, getGeneratedBy(type), typeNode.getContext());
 		typeDecl.defs = typeDecl.defs.append(type);
 		return typeNode.add(type, Kind.TYPE);
 	}
@@ -938,20 +985,52 @@ public class JavacHandlerUtil {
 	
 	public static void addSuppressWarningsAll(JCModifiers mods, JavacNode node, int pos, JCTree source, Context context) {
 		if (!LombokOptionsFactory.getDelombokOptions(context).getFormatPreferences().generateSuppressWarnings()) return;
+		addAnnotation(mods, node, pos, source, context, "java.lang.SuppressWarnings", node.getTreeMaker().Literal("all"));
+		
+		if (Boolean.TRUE.equals(node.getAst().readConfiguration(ConfigurationKeys.ADD_FINDBUGS_SUPPRESSWARNINGS_ANNOTATIONS))) {
+			JavacTreeMaker maker = node.getTreeMaker();
+			JCExpression arg = maker.Assign(maker.Ident(node.toName("justification")), maker.Literal("generated code"));
+			addAnnotation(mods, node, pos, source, context, "edu.umd.cs.findbugs.annotations.SuppressFBWarnings", arg);
+		}
+	}
+	
+	public static void addGenerated(JCModifiers mods, JavacNode node, int pos, JCTree source, Context context) {
+		if (!LombokOptionsFactory.getDelombokOptions(context).getFormatPreferences().generateGenerated()) return;
+		
+		if (!Boolean.FALSE.equals(node.getAst().readConfiguration(ConfigurationKeys.ADD_GENERATED_ANNOTATIONS))) {
+			addAnnotation(mods, node, pos, source, context, "javax.annotation.Generated", node.getTreeMaker().Literal("lombok"));
+		}
+	}
+	
+	private static void addAnnotation(JCModifiers mods, JavacNode node, int pos, JCTree source, Context context, String annotationTypeFqn, JCExpression arg) {
+		boolean isJavaLangBased;
+		String simpleName; {
+			int idx = annotationTypeFqn.lastIndexOf('.');
+			simpleName = idx == -1 ? annotationTypeFqn : annotationTypeFqn.substring(idx + 1);
+			
+			isJavaLangBased = idx == 9 && annotationTypeFqn.regionMatches(0, "java.lang.", 0, 10);
+		}
+		
 		for (JCAnnotation ann : mods.annotations) {
 			JCTree annType = ann.getAnnotationType();
 			Name lastPart = null;
 			if (annType instanceof JCIdent) lastPart = ((JCIdent) annType).name;
 			else if (annType instanceof JCFieldAccess) lastPart = ((JCFieldAccess) annType).name;
 			
-			if (lastPart != null && lastPart.contentEquals("SuppressWarnings")) return;
+			if (lastPart != null && lastPart.contentEquals(simpleName)) return;
 		}
 		JavacTreeMaker maker = node.getTreeMaker();
-		JCExpression suppressWarningsType = genJavaLangTypeRef(node, "SuppressWarnings");
-		JCLiteral allLiteral = maker.Literal("all");
-		suppressWarningsType.pos = pos;
-		allLiteral.pos = pos;
-		JCAnnotation annotation = recursiveSetGeneratedBy(maker.Annotation(suppressWarningsType, List.<JCExpression>of(allLiteral)), source, context);
+		JCExpression annType = isJavaLangBased ? genJavaLangTypeRef(node, simpleName) : chainDotsString(node, annotationTypeFqn);
+		annType.pos = pos;
+		if (arg != null) {
+			arg.pos = pos;
+			if (arg instanceof JCAssign) {
+				((JCAssign) arg).lhs.pos = pos;
+				((JCAssign) arg).rhs.pos = pos;
+			}
+		}
+		List<JCExpression> argList = arg != null ? List.of(arg) : List.<JCExpression>nil();
+		JCAnnotation annotation = recursiveSetGeneratedBy(maker.Annotation(annType, argList), source, context);
 		annotation.pos = pos;
 		mods.annotations = mods.annotations.append(annotation);
 	}
@@ -985,6 +1064,17 @@ public class JavacHandlerUtil {
 		return chainDots(node, -1, null, null, elems);
 	}
 	
+	public static JCExpression chainDots(JavacNode node, LombokImmutableList<String> elems) {
+		assert elems != null;
+		
+		JavacTreeMaker maker = node.getTreeMaker();
+		JCExpression e = null;
+		for (String elem : elems) {
+			if (e == null) e = maker.Ident(node.toName(elem));
+			else e = maker.Select(e, node.toName(elem));
+		}
+		return e;
+	}
 	/**
 	 * In javac, dotted access of any kind, from {@code java.lang.String} to {@code var.methodName}
 	 * is represented by a fold-left of {@code Select} nodes with the leftmost string represented by
@@ -1013,7 +1103,6 @@ public class JavacHandlerUtil {
 		
 		return e;
 	}
-
 	
 	/**
 	 * In javac, dotted access of any kind, from {@code java.lang.String} to {@code var.methodName}
@@ -1429,6 +1518,18 @@ public class JavacHandlerUtil {
 		} catch (Exception ignore) {}
 	}
 	
+	private static final Pattern FIND_RETURN = Pattern.compile("^\\s*\\**\\s*@returns?\\s+.*$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+	static String addReturnsThisIfNeeded(String in) {
+		if (FIND_RETURN.matcher(in).find()) return in;
+		
+		return addJavadocLine(in, "@return this");
+	}
+	
+	static String addJavadocLine(String in, String line) {
+		if (in.endsWith("\n")) return in + line + "\n";
+		return in + "\n" + line;
+	}
+	
 	private static class CopyJavadoc_8 {
 		static void copyJavadoc(JavacNode from, JCTree to, CopyJavadoc copyMode, Object dc) {
 			DocCommentTable dct = (DocCommentTable) dc;
@@ -1436,6 +1537,9 @@ public class JavacHandlerUtil {
 			
 			if (javadoc != null) {
 				String[] filtered = copyMode.split(javadoc.getText());
+				if (copyMode == CopyJavadoc.SETTER && shouldReturnThis(from)) {
+					filtered[0] = addReturnsThisIfNeeded(filtered[0]);
+				}
 				dct.putComment(to, createJavadocComment(filtered[0], from));
 				dct.putComment(from.get(), createJavadocComment(filtered[1], from));
 			}
@@ -1469,6 +1573,9 @@ public class JavacHandlerUtil {
 		
 		if (javadoc != null) {
 			String[] filtered = copyMode.split(javadoc);
+			if (copyMode == CopyJavadoc.SETTER && shouldReturnThis(from)) {
+				filtered[0] = addReturnsThisIfNeeded(filtered[0]);
+			}
 			docComments.put(to, filtered[0]);
 			docComments.put(from.get(), filtered[1]);
 		}

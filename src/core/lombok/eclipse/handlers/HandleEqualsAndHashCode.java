@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2014 The Project Lombok Authors.
+ * Copyright (C) 2009-2015 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@ import lombok.EqualsAndHashCode;
 import lombok.core.AST.Kind;
 import lombok.core.handlers.HandlerUtil;
 import lombok.core.AnnotationValues;
+import lombok.core.configuration.CallSuperType;
 import lombok.eclipse.Eclipse;
 import lombok.eclipse.EclipseAnnotationHandler;
 import lombok.eclipse.EclipseNode;
@@ -185,8 +186,23 @@ public class HandleEqualsAndHashCode extends EclipseAnnotationHandler<EqualsAndH
 			return;
 		}
 		
-		if (!isDirectDescendantOfObject && !callSuper && implicitCallSuper) {
-			errorNode.addWarning("Generating equals/hashCode implementation but without a call to superclass, even though this class does not extend java.lang.Object. If this is intentional, add '@EqualsAndHashCode(callSuper=false)' to your type.");
+		if (implicitCallSuper && !isDirectDescendantOfObject) {
+			CallSuperType cst = typeNode.getAst().readConfiguration(ConfigurationKeys.EQUALS_AND_HASH_CODE_CALL_SUPER);
+			if (cst == null) cst = CallSuperType.WARN;
+			
+			switch (cst) {
+			default:
+			case WARN:
+				errorNode.addWarning("Generating equals/hashCode implementation but without a call to superclass, even though this class does not extend java.lang.Object. If this is intentional, add '@EqualsAndHashCode(callSuper=false)' to your type.");
+				callSuper = false;
+				break;
+			case SKIP:
+				callSuper = false;
+				break;
+			case CALL:
+				callSuper = true;
+				break;
+			}
 		}
 		
 		List<EclipseNode> nodesForEquality = new ArrayList<EclipseNode>();
@@ -358,7 +374,7 @@ public class HandleEqualsAndHashCode extends EclipseAnnotationHandler<EqualsAndH
 					statements.add(createResultCalculation(source, fieldAccessor));
 				} else /* objects */ {
 					/* final java.lang.Object $fieldName = this.fieldName; */
-					/* $fieldName == null ? 0 : $fieldName.hashCode() */
+					/* $fieldName == null ? NULL_PRIME : $fieldName.hashCode() */
 					statements.add(createLocalDeclaration(source, dollarFieldName, generateQualifiedTypeRef(source, TypeConstants.JAVA_LANG_OBJECT), fieldAccessor));
 					
 					SingleNameReference copy1 = new SingleNameReference(dollarFieldName, p);
@@ -375,8 +391,8 @@ public class HandleEqualsAndHashCode extends EclipseAnnotationHandler<EqualsAndH
 					setGeneratedBy(nullLiteral, source);
 					EqualExpression objIsNull = new EqualExpression(copy2, nullLiteral, OperatorIds.EQUAL_EQUAL);
 					setGeneratedBy(objIsNull, source);
-					IntLiteral int0 = makeIntLiteral("0".toCharArray(), source);
-					ConditionalExpression nullOrHashCode = new ConditionalExpression(objIsNull, int0, hashCodeCall);
+					IntLiteral intMagic = makeIntLiteral(String.valueOf(HandlerUtil.primeForNull()).toCharArray(), source);
+					ConditionalExpression nullOrHashCode = new ConditionalExpression(objIsNull, intMagic, hashCodeCall);
 					nullOrHashCode.sourceStart = pS; nullOrHashCode.sourceEnd = pE;
 					setGeneratedBy(nullOrHashCode, source);
 					statements.add(createResultCalculation(source, nullOrHashCode));
@@ -561,7 +577,6 @@ public class HandleEqualsAndHashCode extends EclipseAnnotationHandler<EqualsAndH
 				}
 				NameReference oRef = new SingleNameReference(new char[] { 'o' }, p);
 				setGeneratedBy(oRef, source);
-				other.annotations = createSuppressWarningsAll(source, null);
 				other.initialization = makeCastExpression(oRef, targetType, source);
 				statements.add(other);
 			}
@@ -725,7 +740,7 @@ public class HandleEqualsAndHashCode extends EclipseAnnotationHandler<EqualsAndH
 	
 	
 	public MethodDeclaration createCanEqual(EclipseNode type, ASTNode source, List<Annotation> onParam) {
-		/* public boolean canEqual(final java.lang.Object other) {
+		/* protected boolean canEqual(final java.lang.Object other) {
 		 *     return other instanceof Outer.Inner.MyType;
 		 * }
 		 */

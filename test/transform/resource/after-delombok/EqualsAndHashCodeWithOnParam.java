@@ -9,11 +9,12 @@ class EqualsAndHashCodeWithOnParam {
 	String b;
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public boolean equals(@Nullable final java.lang.Object o) {
 		if (o == this) return true;
 		if (!(o instanceof EqualsAndHashCodeWithOnParam)) return false;
-		final EqualsAndHashCodeWithOnParam other = (EqualsAndHashCodeWithOnParam)o;
-		if (!other.canEqual((java.lang.Object)this)) return false;
+		final EqualsAndHashCodeWithOnParam other = (EqualsAndHashCodeWithOnParam) o;
+		if (!other.canEqual((java.lang.Object) this)) return false;
 		if (this.x != other.x) return false;
 		if (!java.util.Arrays.equals(this.y, other.y)) return false;
 		if (!java.util.Arrays.deepEquals(this.z, other.z)) return false;
@@ -26,11 +27,13 @@ class EqualsAndHashCodeWithOnParam {
 		return true;
 	}
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	protected boolean canEqual(@Nullable final java.lang.Object other) {
 		return other instanceof EqualsAndHashCodeWithOnParam;
 	}
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public int hashCode() {
 		final int PRIME = 59;
 		int result = 1;
@@ -38,9 +41,9 @@ class EqualsAndHashCodeWithOnParam {
 		result = result * PRIME + java.util.Arrays.hashCode(this.y);
 		result = result * PRIME + java.util.Arrays.deepHashCode(this.z);
 		final java.lang.Object $a = this.a;
-		result = result * PRIME + ($a == null ? 0 : $a.hashCode());
+		result = result * PRIME + ($a == null ? 43 : $a.hashCode());
 		final java.lang.Object $b = this.b;
-		result = result * PRIME + ($b == null ? 0 : $b.hashCode());
+		result = result * PRIME + ($b == null ? 43 : $b.hashCode());
 		return result;
 	}
 }

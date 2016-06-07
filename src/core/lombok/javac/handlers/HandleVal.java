@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2014 The Project Lombok Authors.
+ * Copyright (C) 2010-2015 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@ import lombok.javac.ResolutionResetNeeded;
 import org.mangosdk.spi.ProviderFor;
 
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
@@ -50,11 +51,11 @@ import com.sun.tools.javac.util.List;
 @ResolutionResetNeeded
 public class HandleVal extends JavacASTAdapter {
 	@Override public void visitLocal(JavacNode localNode, JCVariableDecl local) {
-		if (local.vartype == null || (!local.vartype.toString().equals("val") && !local.vartype.toString().equals("lombok.val"))) return;
-		
-		JCTree source = local.vartype;
-		
-		if (!typeMatches(val.class, localNode, local.vartype)) return;
+		JCTree typeTree = local.vartype;
+		if (typeTree == null) return;
+		String typeTreeToString = typeTree.toString();
+		if (!typeTreeToString.equals("val") && !typeTreeToString.equals("lombok.val")) return;
+		if (!typeMatches(val.class, localNode, typeTree)) return;
 		
 		handleFlagUsage(localNode, ConfigurationKeys.VAL_FLAG_USAGE, "val");
 		
@@ -87,7 +88,7 @@ public class HandleVal extends JavacASTAdapter {
 		local.mods.flags |= Flags.FINAL;
 		
 		if (!localNode.shouldDeleteLombokAnnotations()) {
-			JCAnnotation valAnnotation = recursiveSetGeneratedBy(localNode.getTreeMaker().Annotation(local.vartype, List.<JCExpression>nil()), source, localNode.getContext());
+			JCAnnotation valAnnotation = recursiveSetGeneratedBy(localNode.getTreeMaker().Annotation(local.vartype, List.<JCExpression>nil()), typeTree, localNode.getContext());
 			local.mods.annotations = local.mods.annotations == null ? List.of(valAnnotation) : local.mods.annotations.append(valAnnotation);
 		}
 		
@@ -110,6 +111,16 @@ public class HandleVal extends JavacASTAdapter {
 					}
 				} else {
 					type = local.init.type;
+					if (type.isErroneous()) {
+						try {
+							JavacResolution resolver = new JavacResolution(localNode.getContext());
+							local.type = Symtab.instance(localNode.getContext()).unknownType;
+							type = ((JCExpression) resolver.resolveMethodMember(localNode).get(local.init)).type;
+						} catch (RuntimeException e) {
+							System.err.println("Exception while resolving: " + localNode);
+							throw e;
+						}
+					}
 				}
 			} else {
 				if (rhsOfEnhancedForLoop.type == null) {
@@ -145,7 +156,7 @@ public class HandleVal extends JavacASTAdapter {
 			local.vartype = JavacResolution.createJavaLangObject(localNode.getAst());
 			throw e;
 		} finally {
-			recursiveSetGeneratedBy(local.vartype, source, localNode.getContext());
+			recursiveSetGeneratedBy(local.vartype, typeTree, localNode.getContext());
 		}
 	}
 }

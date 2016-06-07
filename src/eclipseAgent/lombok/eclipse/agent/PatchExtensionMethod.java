@@ -24,6 +24,8 @@ package lombok.eclipse.agent;
 import static lombok.eclipse.handlers.EclipseHandlerUtil.createAnnotation;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -56,6 +58,7 @@ import org.eclipse.jdt.internal.compiler.lookup.CompilationUnitScope;
 import org.eclipse.jdt.internal.compiler.lookup.MethodBinding;
 import org.eclipse.jdt.internal.compiler.lookup.ProblemMethodBinding;
 import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
+import org.eclipse.jdt.internal.compiler.lookup.Scope;
 import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeIds;
 import org.eclipse.jdt.internal.compiler.problem.ProblemReporter;
@@ -89,16 +92,47 @@ public class PatchExtensionMethod {
 		private final ProblemReporter problemReporter;
 		private final WeakReference<MessageSend> messageSendRef;
 		private final MethodBinding method;
+		private final Scope scope;
 		
-		PostponedInvalidMethodError(ProblemReporter problemReporter, MessageSend messageSend, MethodBinding method) {
+		private static final Method shortMethod = getMethod("invalidMethod", MessageSend.class, MethodBinding.class);
+		private static final Method longMethod = getMethod("invalidMethod", MessageSend.class, MethodBinding.class, Scope.class);
+		
+		private static Method getMethod(String name, Class<?>... types) {
+			try {
+				Method m = ProblemReporter.class.getMethod(name, types);
+				m.setAccessible(true);
+				return m;
+			} catch (Exception e) {
+				return null;
+			}
+		}
+		
+		PostponedInvalidMethodError(ProblemReporter problemReporter, MessageSend messageSend, MethodBinding method, Scope scope) {
 			this.problemReporter = problemReporter;
 			this.messageSendRef = new WeakReference<MessageSend>(messageSend);
 			this.method = method;
+			this.scope = scope;
+		}
+		
+		static void invoke(ProblemReporter problemReporter, MessageSend messageSend, MethodBinding method, Scope scope) {
+			if (messageSend != null) {
+				try {
+					if (shortMethod != null) shortMethod.invoke(problemReporter, messageSend, method);
+					else if (longMethod != null) longMethod.invoke(problemReporter, messageSend, method, scope);
+				} catch (IllegalAccessException e) {
+					throw new RuntimeException(e);
+				} catch (InvocationTargetException e) {
+					Throwable t = e.getCause();
+					if (t instanceof Error) throw (Error) t;
+					if (t instanceof RuntimeException) throw (RuntimeException) t;
+					throw new RuntimeException(t);
+				}
+			}
 		}
 		
 		public void fire() {
 			MessageSend messageSend = messageSendRef.get();
-			if (messageSend != null) problemReporter.invalidMethod(messageSend, method);
+			invoke(problemReporter, messageSend, method, scope);
 		}
 	}
 	
@@ -185,7 +219,11 @@ public class PatchExtensionMethod {
 	}
 	
 	public static void invalidMethod(ProblemReporter problemReporter, MessageSend messageSend, MethodBinding method) {
-		MessageSend_postponedErrors.set(messageSend, new PostponedInvalidMethodError(problemReporter, messageSend, method));
+		MessageSend_postponedErrors.set(messageSend, new PostponedInvalidMethodError(problemReporter, messageSend, method, null));
+	}
+	
+	public static void invalidMethod(ProblemReporter problemReporter, MessageSend messageSend, MethodBinding method, Scope scope) {
+		MessageSend_postponedErrors.set(messageSend, new PostponedInvalidMethodError(problemReporter, messageSend, method, scope));
 	}
 	
 	public static TypeBinding resolveType(TypeBinding resolvedType, MessageSend methodCall, BlockScope scope) {
@@ -224,12 +262,16 @@ public class PatchExtensionMethod {
 				if (methodCall.arguments != null) arguments.addAll(Arrays.asList(methodCall.arguments));
 				List<TypeBinding> argumentTypes = new ArrayList<TypeBinding>();
 				for (Expression argument : arguments) {
-					argumentTypes.add(argument.resolvedType);
+					if (argument.resolvedType != null) argumentTypes.add(argument.resolvedType);
+					// TODO: Instead of just skipping nulls entirely, there is probably a 'unresolved type' placeholder. THAT is what we ought to be adding here!
 				}
+				Expression[] originalArgs = methodCall.arguments;
+				methodCall.arguments = arguments.toArray(new Expression[0]);
 				MethodBinding fixedBinding = scope.getMethod(extensionMethod.declaringClass, methodCall.selector, argumentTypes.toArray(new TypeBinding[0]), methodCall);
 				if (fixedBinding instanceof ProblemMethodBinding) {
+					methodCall.arguments = originalArgs;
 					if (fixedBinding.declaringClass != null) {
-						scope.problemReporter().invalidMethod(methodCall, fixedBinding);
+						PostponedInvalidMethodError.invoke(scope.problemReporter(), methodCall, fixedBinding, scope);
 					}
 				} else {
 					for (int i = 0, iend = arguments.size(); i < iend; i++) {
@@ -246,7 +288,6 @@ public class PatchExtensionMethod {
 							arg.implicitConversion = TypeIds.UNBOXING | (id + (id << 4)); // magic see TypeIds
 						}
 					}
-					methodCall.arguments = arguments.toArray(new Expression[0]);
 					
 					methodCall.receiver = createNameRef(extensionMethod.declaringClass, methodCall);
 					methodCall.actualReceiverType = extensionMethod.declaringClass;

@@ -5,11 +5,12 @@ class GetterLazyEahcToString {
 	
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public boolean equals(final java.lang.Object o) {
 		if (o == this) return true;
 		if (!(o instanceof GetterLazyEahcToString)) return false;
-		final GetterLazyEahcToString other = (GetterLazyEahcToString)o;
-		if (!other.canEqual((java.lang.Object)this)) return false;
+		final GetterLazyEahcToString other = (GetterLazyEahcToString) o;
+		if (!other.canEqual((java.lang.Object) this)) return false;
 		final java.lang.Object this$value = this.getValue();
 		final java.lang.Object other$value = other.getValue();
 		if (this$value == null ? other$value != null : !this$value.equals(other$value)) return false;
@@ -20,29 +21,35 @@ class GetterLazyEahcToString {
 	}
 	
 	@java.lang.SuppressWarnings("all")
+	
+	@javax.annotation.Generated("lombok")
 	protected boolean canEqual(final java.lang.Object other) {
 		return other instanceof GetterLazyEahcToString;
 	}
 	
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public int hashCode() {
 		final int PRIME = 59;
 		int result = 1;
 		final java.lang.Object $value = this.getValue();
-		result = result * PRIME + ($value == null ? 0 : $value.hashCode());
+		result = result * PRIME + ($value == null ? 43 : $value.hashCode());
 		final java.lang.Object $value2 = this.value2;
-		result = result * PRIME + ($value2 == null ? 0 : $value2.hashCode());
+		result = result * PRIME + ($value2 == null ? 43 : $value2.hashCode());
 		return result;
 	}
 	
 	@java.lang.Override
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public java.lang.String toString() {
 		return "GetterLazyEahcToString(value=" + this.getValue() + ", value2=" + this.value2 + ")";
 	}
 	
 	@java.lang.SuppressWarnings("all")
+	
+	@javax.annotation.Generated("lombok")
 	public String getValue() {
 		java.lang.Object value = this.value.get();
 		if (value == null) {
@@ -55,10 +62,11 @@ class GetterLazyEahcToString {
 				}
 			}
 		}
-		return (String)(value == this.value ? null : value);
+		return (String) (value == this.value ? null : value);
 	}
 	
 	@java.lang.SuppressWarnings("all")
+	@javax.annotation.Generated("lombok")
 	public String getValue2() {
 		return this.value2;
 	}

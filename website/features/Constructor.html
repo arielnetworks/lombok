@@ -17,8 +17,7 @@
 			<p>
 			This set of 3 annotations generate a constructor that will accept 1 parameter for certain fields, and simply assigns this parameter to the field.
 			</p><p>
-			<code>@NoArgsConstructor</code> will generate a constructor with no parameters. If this is not possible (because of final fields), a compiler error will result instead.
-			For fields with constraints, such as <code>@NonNull</code> fields, <em>no</em> check or assignment is generated, so be aware that these constraints may then not be
+			<code>@NoArgsConstructor</code> will generate a constructor with no parameters. If this is not possible (because of final fields), a compiler error will result instead, unless <code>@NoArgsConstructor(force = true)</code> is used, then all final fields are initialized with 0 / false / null. For fields with constraints, such as <code>@NonNull</code> fields, <em>no</em> check or assignment is generated, so be aware that these constraints may then not be
 			fulfilled until those fields are properly initialized later. Certain java constructs, such as hibernate and the Service Provider Interface require a no-args constructor.
 			This annotation is useful primarily in combination with either <code>@Data</code> or one of the other constructor generating annotations.
 			</p><p>
@@ -38,7 +37,7 @@
 			To put annotations on the generated constructor, you can use <code>onConstructor=@__({@AnnotationsHere})</code>, but be careful; this is an experimental feature. For more details see the documentation on the <a href="experimental/onX.html">onX</a> feature.
 			</p><p>
 			Static fields are skipped by these annotations. Also, a <code>@java.beans.ConstructorProperties</code> annotation is added for all constructors with at least 1 argument,
-			which allows bean editor tools to call the generated constructors. <code>@ConstructorProperties</code> is now in Java 1.6, which means that if your code is intended for
+			which allows bean editor tools to call the generated constructors. <code>@ConstructorProperties</code> is new in Java 1.6, which means that if your code is intended for
 			compilation on Java 1.5, a compiler error will occur. <em>Running</em> on a JVM 1.5 should be no problem (the annotation will be ignored). To suppress the generation of
 			the <code>@ConstructorProperties</code> annotation, add a parameter to your annotation: <code>@AllArgsConstructor(suppressConstructorProperties=true)</code>. However,
 			as java 1.5, which has already been end-of-lifed, fades into obscurity, this parameter will eventually be removed. It has also been marked deprecated for this reason.
@@ -93,7 +92,7 @@
 		</div>
 		<div class="footer">
 			<a href="index.html">Back to features</a> | <a href="EqualsAndHashCode.html">Previous feature (@EqualsAndHashCode)</a> | <a href="Data.html">Next feature (@Data)</a><br />
-			<a href="../credits.html" class="creditsLink">credits</a> | <span class="copyright">Copyright &copy; 2010-2013 The Project Lombok Authors, licensed under the <a href="http://www.opensource.org/licenses/mit-license.php">MIT license</a>.</span>
+			<a href="../credits.html" class="creditsLink">credits</a> | <span class="copyright">Copyright &copy; 2009-2016 The Project Lombok Authors, licensed under the <a href="http://www.opensource.org/licenses/mit-license.php">MIT license</a>.</span>
 		</div>
 		<div style="clear: both;"></div>
 	</div>

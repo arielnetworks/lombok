@@ -70,7 +70,18 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	}
 	
 	private static volatile boolean skipEclipseWorkspaceBasedFileResolver = false;
+	private static final URI NOT_CALCULATED_MARKER = URI.create("https://projectlombok.org/not/calculated");
+	private URI memoizedAbsoluteFileLocation = NOT_CALCULATED_MARKER;
+	
 	public URI getAbsoluteFileLocation() {
+		if (memoizedAbsoluteFileLocation != NOT_CALCULATED_MARKER) return memoizedAbsoluteFileLocation;
+		
+		memoizedAbsoluteFileLocation = getAbsoluteFileLocation0();
+		return memoizedAbsoluteFileLocation;
+	}
+	
+	/** This is the call, but we wrapped it to memoize this. */
+	private URI getAbsoluteFileLocation0() {
 		String fileName = getFileName();
 		if (fileName != null && (fileName.startsWith("file:") || fileName.startsWith("sourcecontrol:"))) {
 			// Some exotic build systems get real fancy with filenames. Known culprits:
@@ -156,7 +167,25 @@ public class EclipseAST extends AST<EclipseAST, EclipseNode, ASTNode> {
 	
 	private static class EclipseWorkspaceBasedFileResolver {
 		public static URI resolve(String path) {
-			return ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(path)).getLocationURI();
+			/* eclipse issue: When creating snippets, for example to calculate 'find callers', refactor scripts, save actions, etc,
+			 * eclipse creates a psuedo-file whose path is simply "/SimpleName.java", which cannot be turned back into a real location.
+			 * What we really need to do is find out which file is the source of this script job and use its directory instead. For now,
+			 * we just go with all defaults; these operations are often not sensitive to proper lomboking or aren't even lomboked at all.
+			 * 
+			 * Reliable way to reproduce this (Kepler, possibly with JDK8 beta support):
+			 * * Have a method, called once by some code in another class.
+			 * * Refactor it with the 'change method signature' refactor script, and add a parameter and hit 'ok'.
+			 */
+			if (path == null || path.indexOf('/', 1) == -1) {
+				return null;
+			}
+			try {
+				return ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(path)).getLocationURI();
+			} catch (Exception e) {
+				// One of the exceptions that can occur is IllegalStateException (during getWorkspace())
+				// if you try to run this while eclipse is shutting down.
+				return null;
+			}
 		}
 	}
 	

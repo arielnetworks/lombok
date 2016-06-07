@@ -23,6 +23,7 @@ package lombok;
 
 import java.util.List;
 
+import lombok.core.configuration.CallSuperType;
 import lombok.core.configuration.ConfigurationKey;
 import lombok.core.configuration.FlagUsageType;
 import lombok.core.configuration.NullCheckExceptionType;
@@ -34,6 +35,24 @@ public class ConfigurationKeys {
 	private ConfigurationKeys() {}
 	
 	// ##### main package features #####
+	
+	// ----- global -----
+	
+	/**
+	 * lombok configuration: {@code lombok.addGeneratedAnnotation} = {@code true} | {@code false}.
+	 * 
+	 * If unset or {@code true}, lombok generates {@code @javax.annotation.Generated("lombok")} on all fields, methods, and types that are generated.
+	 */
+	public static final ConfigurationKey<Boolean> ADD_GENERATED_ANNOTATIONS = new ConfigurationKey<Boolean>("lombok.addGeneratedAnnotation", "Generate @javax.annotation.Generated on all generated code (default: true).") {};
+	
+	/**
+	 * lombok configuration: {@code lombok.extern.findbugs.addSuppressFBWarnings} = {@code true} | {@code false}.
+	 * 
+	 * If {@code true}, lombok generates {@code edu.umd.cs.findbugs.annotations.SuppressFBWarnings} on all fields, methods, and types that are generated.
+	 * 
+	 * NB: If you enable this option, findbugs must be on the source or classpath, or you'll get errors that the type {@code SuppressFBWarnings} cannot be found.
+	 */
+	public static final ConfigurationKey<Boolean> ADD_FINDBUGS_SUPPRESSWARNINGS_ANNOTATIONS = new ConfigurationKey<Boolean>("lombok.extern.findbugs.addSuppressFBWarnings", "Generate @edu.umd.cs.findbugs.annotations.SuppressFBWArnings on all generated code (default: false).") {};
 	
 	// ----- *ArgsConstructor -----
 	
@@ -133,9 +152,16 @@ public class ConfigurationKeys {
 	/**
 	 * lombok configuration: {@code lombok.equalsAndHashCode.doNotUseGetters} = {@code true} | {@code false}.
 	 * 
-	 * For any class without an {@code @EqualsAndHashCode} that explicitly defines the {@code doNotUseGetters} option, this value is used.
+	 * For any class without an {@code @EqualsAndHashCode} that explicitly defines the {@code doNotUseGetters} option, this value is used (default = false).
 	 */
-	public static final ConfigurationKey<Boolean> EQUALS_AND_HASH_CODE_DO_NOT_USE_GETTERS = new ConfigurationKey<Boolean>("lombok.equalsAndHashCode.doNotUseGetters", "Don't call the getters but use the fields directly in the generated equalsAndHashCode method.") {};
+	public static final ConfigurationKey<Boolean> EQUALS_AND_HASH_CODE_DO_NOT_USE_GETTERS = new ConfigurationKey<Boolean>("lombok.equalsAndHashCode.doNotUseGetters", "Don't call the getters but use the fields directly in the generated equals and hashCode method (default = false).") {};
+	
+	/**
+	 * lombok configuration: {@code lombok.equalsAndHashCode.callSuper} = {@code call} | {@code ignore} | {@code warn}.
+	 * 
+	 * For any class with an {@code @EqualsAndHashCode} annotation which extends a class other than {@code java.lang.Object}, should a call to superclass's implementation of {@code equals} and {@code hashCode} be included in the generated methods? (Default = warn)
+	 */
+	public static final ConfigurationKey<CallSuperType> EQUALS_AND_HASH_CODE_CALL_SUPER = new ConfigurationKey<CallSuperType>("lombok.equalsAndHashCode.callSuper", "When generating equals and hashCode for classes that don't extend Object, either automatically take into account superclass implementation (call), or don't (skip), or warn and don't (warn). (default = warn).") {};
 	
 	/**
 	 * lombok configuration: {@code lombok.equalsAndHashCode.flagUsage} = {@code WARNING} | {@code ERROR}.
@@ -149,9 +175,9 @@ public class ConfigurationKeys {
 	/**
 	 * lombok configuration: {@code lombok.toString.doNotUseGetters} = {@code true} | {@code false}.
 	 * 
-	 * For any class without an {@code @ToString} that explicitly defines the {@code doNotUseGetters} option, this value is used.
+	 * For any class without an {@code @ToString} that explicitly defines the {@code doNotUseGetters} option, this value is used  (default = false).
 	 */
-	public static final ConfigurationKey<Boolean> TO_STRING_DO_NOT_USE_GETTERS = new ConfigurationKey<Boolean>("lombok.toString.doNotUseGetters", "Don't call the getters but use the fields directly in the generated toString method.") {};
+	public static final ConfigurationKey<Boolean> TO_STRING_DO_NOT_USE_GETTERS = new ConfigurationKey<Boolean>("lombok.toString.doNotUseGetters", "Don't call the getters but use the fields directly in the generated toString method (default = false).") {};
 	
 	/**
 	 * lombok configuration: {@code lombok.toString.flagUsage} = {@code WARNING} | {@code ERROR}.
@@ -163,9 +189,35 @@ public class ConfigurationKeys {
 	/**
 	 * lombok configuration: {@code lombok.toString.includeFieldNames} = {@code true} | {@code false}.
 	 * 
-	 * For any class without an {@code @ToString} that explicitly defines the {@code includeFieldNames} option, this value is used.
+	 * For any class without an {@code @ToString} that explicitly defines the {@code includeFieldNames} option, this value is used  (default = true).
 	 */
-	public static final ConfigurationKey<Boolean> TO_STRING_INCLUDE_FIELD_NAMES = new ConfigurationKey<Boolean>("lombok.toString.includeFieldNames", "Include the field names in the generated toString method.") {};
+	public static final ConfigurationKey<Boolean> TO_STRING_INCLUDE_FIELD_NAMES = new ConfigurationKey<Boolean>("lombok.toString.includeFieldNames", "Include the field names in the generated toString method (default = true).") {};
+	
+	// ----- Builder -----
+	
+	/**
+	 * lombok configuration: {@code lombok.builder.flagUsage} = {@code WARNING} | {@code ERROR}.
+	 * 
+	 * If set, <em>any</em> usage of {@code @Builder} results in a warning / error.
+	 */
+	public static final ConfigurationKey<FlagUsageType> BUILDER_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.builder.flagUsage", "Emit a warning or error if @Builder is used.") {};
+	
+	// ----- Singular -----
+	
+	/**
+	 * lombok configuration: {@code lombok.singular.useGuava} = {@code true} | {@code false}.
+	 * 
+	 * If explicitly set to {@code true}, guava's {@code ImmutableList} etc are used to implement the immutable collection datatypes generated by @Singular @Builder for fields/parameters of type {@code java.util.List} and such.
+	 * By default, unmodifiable-wrapped versions of {@code java.util} types are used.
+	 */
+	public static final ConfigurationKey<Boolean> SINGULAR_USE_GUAVA = new ConfigurationKey<Boolean>("lombok.singular.useGuava", "Generate backing immutable implementations for @Singular on java.util.* types by using guava's ImmutableList, etc. Normally java.util's mutable types are used and wrapped to make them immutable.") {}; 
+	
+	/**
+	 * lombok configuration: {@code lombok.singular.auto} = {@code true} | {@code false}.
+	 * 
+	 * By default or if explicitly set to {@code true}, lombok will attempt to automatically singularize the name of your variable/parameter when using {@code @Singular}; the name is assumed to be written in english, and a plural. If explicitly to {@code false}, you must always specify the singular form; this is especially useful if your identifiers are in a foreign language.
+	 */
+	public static final ConfigurationKey<Boolean> SINGULAR_AUTO = new ConfigurationKey<Boolean>("lombok.singular.auto", "If true (default): Automatically singularize the assumed-to-be-plural name of your variable/parameter when using {@code @Singular}.") {}; 
 	
 	// ##### Standalones #####
 	
@@ -194,7 +246,7 @@ public class ConfigurationKeys {
 	 * 
 	 * Sets the exception to throw if {@code @NonNull} is applied to a method parameter, and a caller passes in {@code null}.
 	 */
-	public static final ConfigurationKey<NullCheckExceptionType> NON_NULL_EXCEPTION_TYPE = new ConfigurationKey<NullCheckExceptionType>("lombok.nonNull.exceptionType", "The type of the exception to throw if a passed-in argument is null. Default: NullPointerException.") {};
+	public static final ConfigurationKey<NullCheckExceptionType> NON_NULL_EXCEPTION_TYPE = new ConfigurationKey<NullCheckExceptionType>("lombok.nonNull.exceptionType", "The type of the exception to throw if a passed-in argument is null (Default: NullPointerException).") {};
 	
 	/**
 	 * lombok configuration: {@code lombok.nonNull.flagUsage} = {@code WARNING} | {@code ERROR}.
@@ -289,7 +341,7 @@ public class ConfigurationKeys {
 	 * 
 	 * If set the various log annotations (which make a log field) will use the stated identifier instead of {@code log} as a name.
 	 */
-	public static final ConfigurationKey<String> LOG_ANY_FIELD_NAME = new ConfigurationKey<String>("lombok.log.fieldName", "Use this name for the generated logger fields (default: 'log')") {};
+	public static final ConfigurationKey<String> LOG_ANY_FIELD_NAME = new ConfigurationKey<String>("lombok.log.fieldName", "Use this name for the generated logger fields (default: 'log').") {};
 	
 	/**
 	 * lombok configuration: {@code lombok.log.fieldIsStatic} = {@code true} | {@code false}.
@@ -329,25 +381,16 @@ public class ConfigurationKeys {
 	/**
 	 * lombok configuration: {@code lombok.accessors.chain} = {@code true} | {@code false}.
 	 * 
-	 * For any class without an {@code @Accessors} that explicitly defines the {@code chain} option, this value is used.
+	 * For any class without an {@code @Accessors} that explicitly defines the {@code chain} option, this value is used (default = false).
 	 */
-	public static final ConfigurationKey<Boolean> ACCESSORS_CHAIN = new ConfigurationKey<Boolean>("lombok.accessors.chain", "Generate setters that return 'this' instead of 'void'.") {};
+	public static final ConfigurationKey<Boolean> ACCESSORS_CHAIN = new ConfigurationKey<Boolean>("lombok.accessors.chain", "Generate setters that return 'this' instead of 'void' (default: false).") {};
 	
 	/**
 	 * lombok configuration: {@code lombok.accessors.fluent} = {@code true} | {@code false}.
 	 * 
-	 * For any class without an {@code @Accessors} that explicitly defines the {@code fluent} option, this value is used.
+	 * For any class without an {@code @Accessors} that explicitly defines the {@code fluent} option, this value is used (default = false).
 	 */
-	public static final ConfigurationKey<Boolean> ACCESSORS_FLUENT = new ConfigurationKey<Boolean>("lombok.accessors.fluent", "Generate getters and setters using only the field name (no get/set prefix).") {};
-	
-	// ----- Builder -----
-	
-	/**
-	 * lombok configuration: {@code lombok.builder.flagUsage} = {@code WARNING} | {@code ERROR}.
-	 * 
-	 * If set, <em>any</em> usage of {@code @Builder} results in a warning / error.
-	 */
-	public static final ConfigurationKey<FlagUsageType> BUILDER_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.builder.flagUsage", "Emit a warning or error if @Builder is used.") {};
+	public static final ConfigurationKey<Boolean> ACCESSORS_FLUENT = new ConfigurationKey<Boolean>("lombok.accessors.fluent", "Generate getters and setters using only the field name (no get/set prefix) (default: false).") {};
 	
 	// ----- ExtensionMethod -----
 	
@@ -361,11 +404,43 @@ public class ConfigurationKeys {
 	// ----- FieldDefaults -----
 	
 	/**
+	 * lombok configuration: {@code lombok.fieldDefaults.defaultPrivate} = {@code true} | {@code false}.
+	 * 
+	 * If set to <code>true</code> <em>any</em> field without an access modifier or {@code @PackagePrivate} is marked as {@code private} by lombok, in all source files compiled.
+	 */
+	public static final ConfigurationKey<Boolean> FIELD_DEFAULTS_PRIVATE_EVERYWHERE = new ConfigurationKey<Boolean>("lombok.fieldDefaults.defaultPrivate", "If true, fields without any access modifier, in any file (lombok annotated or not) are marked as private. Use @PackagePrivate or an explicit modifier to override this.") {};
+	
+	/**
+	 * lombok configuration: {@code lombok.fieldDefaults.defaultFinal} = {@code true} | {@code false}.
+	 * 
+	 * If set to <code>true</code> <em>any</em> field without {@code @NonFinal} is marked as {@code final} by lombok, in all source files compiled.
+	 */
+	public static final ConfigurationKey<Boolean> FIELD_DEFAULTS_FINAL_EVERYWHERE = new ConfigurationKey<Boolean>("lombok.fieldDefaults.defaultFinal", "If true, fields, in any file (lombok annotated or not) are marked as final. Use @NonFinal to override this.") {};
+	
+	/**
 	 * lombok configuration: {@code lombok.fieldDefaults.flagUsage} = {@code WARNING} | {@code ERROR}.
 	 * 
 	 * If set, <em>any</em> usage of {@code @FieldDefaults} results in a warning / error.
 	 */
 	public static final ConfigurationKey<FlagUsageType> FIELD_DEFAULTS_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.fieldDefaults.flagUsage", "Emit a warning or error if @FieldDefaults is used.") {};
+	
+	// ----- Helper -----
+	
+	/**
+	 * lombok configuration: {@code lombok.helper.flagUsage} = {@code WARNING} | {@code ERROR}.
+	 * 
+	 * If set, <em>any</em> usage of {@code @Helper} results in a warning / error.
+	 */
+	public static final ConfigurationKey<FlagUsageType> HELPER_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.helper.flagUsage", "Emit a warning or error if @Helper is used.") {};
+	
+	// ----- UtilityClass -----
+	
+	/**
+	 * lombok configuration: {@code lombok.utilityClass.flagUsage} = {@code WARNING} | {@code ERROR}.
+	 * 
+	 * If set, <em>any</em> usage of {@code @UtilityClass} results in a warning / error.
+	 */
+	public static final ConfigurationKey<FlagUsageType> UTILITY_CLASS_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.utilityClass.flagUsage", "Emit a warning or error if @UtilityClass is used.") {};
 	
 	// ----- Wither -----
 	
@@ -375,7 +450,6 @@ public class ConfigurationKeys {
 	 * If set, <em>any</em> usage of {@code @Wither} results in a warning / error.
 	 */
 	public static final ConfigurationKey<FlagUsageType> WITHER_FLAG_USAGE = new ConfigurationKey<FlagUsageType>("lombok.wither.flagUsage", "Emit a warning or error if @Wither is used.") {};
-	
 	
 	// ----- Configuration System -----
 	

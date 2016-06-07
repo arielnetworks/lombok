@@ -49,6 +49,7 @@ import lombok.installer.UninstallException;
 public class EclipseLocation extends IdeLocation {
 	private final String name;
 	private final File eclipseIniPath;
+	private final String pathToLombokJarPrefix;
 	private volatile boolean hasLombok;
 	
 	private static final String OS_NEWLINE = IdeFinder.getOS().getLineEnding();
@@ -64,6 +65,15 @@ public class EclipseLocation extends IdeLocation {
 	EclipseLocation(String nameOfLocation, File pathToEclipseIni) throws CorruptedIdeLocationException {
 		this.name = nameOfLocation;
 		this.eclipseIniPath = pathToEclipseIni;
+		File p1 = pathToEclipseIni.getParentFile();
+		File p2 = p1 == null ? null : p1.getParentFile();
+		File p3 = p2 == null ? null : p2.getParentFile();
+		if (p1 != null && p1.getName().equals("Eclipse") && p2 != null && p2.getName().equals("Contents") && p3 != null && p3.getName().endsWith(".app")) {
+			this.pathToLombokJarPrefix = "../Eclipse/";
+		} else {
+			this.pathToLombokJarPrefix = "";
+		}
+		
 		try {
 			this.hasLombok = checkForLombok(eclipseIniPath);
 		} catch (IOException e) {
@@ -333,12 +343,15 @@ public class EclipseLocation extends IdeLocation {
 				fis.close();
 			}
 			
-			String fullPathToLombok = fullPathRequired ? (lombokJar.getParentFile().getCanonicalPath() + File.separator) : "";
+			String pathPrefix;
+			if (fullPathRequired) {
+				pathPrefix = lombokJar.getParentFile().getCanonicalPath() + File.separator;
+			} else {
+				pathPrefix = pathToLombokJarPrefix;
+			}
 			
 			newContents.append(String.format(
-					"-javaagent:%s", escapePath(fullPathToLombok + "lombok.jar"))).append(OS_NEWLINE);
-			newContents.append(String.format(
-					"-Xbootclasspath/a:%s", escapePath(fullPathToLombok + "lombok.jar"))).append(OS_NEWLINE);
+					"-javaagent:%s", escapePath(pathPrefix + "lombok.jar"))).append(OS_NEWLINE);
 			
 			FileOutputStream fos = new FileOutputStream(eclipseIniPath);
 			try {
@@ -360,8 +373,7 @@ public class EclipseLocation extends IdeLocation {
 		}
 		
 		return "If you start " + getTypeName() + " with a custom -vm parameter, you'll need to add:<br>" +
-				"<code>-vmargs -Xbootclasspath/a:lombok.jar -javaagent:lombok.jar</code><br>" +
-				"as parameter as well.";
+				"<code>-vmargs -javaagent:lombok.jar</code><br>as parameter as well.";
 	}
 	
 	@Override public URL getIdeIcon() {

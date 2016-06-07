@@ -21,10 +21,14 @@
  */
 package lombok;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.PrintStream;
 import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
 import java.util.Collection;
 import java.util.Locale;
+import java.util.Map;
 
 import lombok.delombok.Delombok;
 import lombok.javac.CapturingDiagnosticListener;
@@ -34,10 +38,13 @@ public class RunTestsViaDelombok extends AbstractRunTests {
 	private Delombok delombok = new Delombok();
 	
 	@Override
-	public void transformCode(Collection<CompilerMessage> messages, StringWriter result, final File file) throws Throwable {
-		delombok.setVerbose(false);
+	public boolean transformCode(Collection<CompilerMessage> messages, StringWriter result, final File file, String encoding, Map<String, String> formatPreferences) throws Throwable {
+		delombok.setVerbose(true);
+		ChangedChecker cc = new ChangedChecker();
+		delombok.setFeedback(cc.feedback);
 		delombok.setForceProcess(true);
-		delombok.setCharset("UTF-8");
+		delombok.setCharset(encoding == null ? "UTF-8" : encoding);
+		delombok.setFormatPreferences(formatPreferences);
 		
 		delombok.setDiagnosticsListener(new CapturingDiagnosticListener(file, messages));
 		
@@ -50,8 +57,23 @@ public class RunTestsViaDelombok extends AbstractRunTests {
 		try {
 			Locale.setDefault(Locale.ENGLISH);
 			delombok.delombok();
+			return cc.isChanged();
 		} finally {
 			Locale.setDefault(originalLocale);
+		}
+	}
+	
+	static class ChangedChecker {
+		private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		private final PrintStream feedback;
+		
+		ChangedChecker() throws UnsupportedEncodingException {
+			feedback = new PrintStream(bytes, true, "UTF-8");
+		}
+		
+		boolean isChanged() throws UnsupportedEncodingException {
+			feedback.flush();
+			return bytes.toString("UTF-8").endsWith("[delomboked]\n");
 		}
 	}
 }
